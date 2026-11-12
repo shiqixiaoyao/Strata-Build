@@ -1,0 +1,670 @@
+@import Darwin;
+@import MachO;
+@import UIKit;
+@import UniformTypeIdentifiers;
+@import Security;
+#import <IOKit/IOKitLib.h>
+#import <os/proc.h>
+#import <mach/mach.h>
+
+#import "LCUtils.h"
+#import "../../LiveContainer/StrataGuestControls.h"
+#import "../../LiveContainer/LCSharedUtils.h"
+#import "LCAppInfo.h"
+#import "../../MultitaskSupport/DecoratedAppSceneViewController.h"
+#import "../../ZSign/zsigner.h"
+#import "LiveContainerSwiftUI-Swift.h"
+
+// make SFSafariView happy and open data: URLs
+@implementation NSURL(hack)
+- (BOOL)safari_isHTTPFamilyURL {
+    // Screw it, Apple
+    return YES;
+}
+@end
+
+@protocol StrataRefreshBridgeAPI
++ (void)refreshWithCompletion:(void (^)(NSString *error))completion;
++ (void)cancel;
+@end
+
+@implementation LCUtils
++ (void)strataRefreshSideStore:(void (^)(NSString *error))completion {
+    Class bridge = NSClassFromString(@"StrataSideStoreRefreshBridge");
+    if (!bridge) {
+        dlopen("@executable_path/Frameworks/SideStoreSupport.framework/SideStoreSupport", RTLD_LAZY);
+        bridge = NSClassFromString(@"StrataSideStoreRefreshBridge");
+    }
+    if (![bridge respondsToSelector:@selector(refreshWithCompletion:)]) {
+        completion(@"This installation does not include the Strata SideStore refresh bridge. Install the combined update and keep all extensions."); return;
+    }
+    [(id<StrataRefreshBridgeAPI>)bridge refreshWithCompletion:completion];
+}
++ (void)strataCancelSideStoreRefresh {
+    Class bridge = NSClassFromString(@"StrataSideStoreRefreshBridge");
+    if ([bridge respondsToSelector:@selector(cancel)]) [(id<StrataRefreshBridgeAPI>)bridge cancel];
+}
+
++ (void)strataSetSwitcherLiveProvider:(UIView *(^)(NSString *))live front:(NSString *(^)(void))front {
+    StrataSetSwitcherProviders(live, front);
+}
++ (void)strataToggleAppSwitcher {
+    UIWindow *window = nil;
+    for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *candidate in scene.windows) if (candidate.isKeyWindow) { window = candidate; break; }
+    }
+    StrataToggleHostControls(window);
+}
++ (BOOL)strataCanDebug {
+    void *task = SecTaskCreateFromSelf(NULL);
+    if (!task) return NO;
+    CFTypeRef value = SecTaskCopyValueForEntitlement(task, CFSTR("get-task-allow"), NULL);
+    BOOL allowed = value && CFEqual(value, kCFBooleanTrue);
+    if (value) CFRelease(value);
+    CFRelease(task);
+    return allowed;
+}
++ (NSDictionary *)strataMemoryStatus {
+    void *task = SecTaskCreateFromSelf(NULL);
+    BOOL (^flag)(NSString *) = ^BOOL(NSString *key) {
+        if (!task) return NO;
+        CFTypeRef value = SecTaskCopyValueForEntitlement(task, (__bridge CFStringRef)key, NULL);
+        BOOL enabled = value && CFEqual(value, kCFBooleanTrue);
+        if (value) CFRelease(value);
+        return enabled;
+    };
+    NSString *memoryKey = @"com.apple.developer.kernel.increased-memory-limit";
+    NSString *addressKey = @"com.apple.developer.kernel.extended-virtual-addressing";
+    NSString *debugKey = @"com.apple.developer.kernel.increased-debugging-memory-limit";
+    BOOL hostMemory = flag(memoryKey), hostAddress = flag(addressKey), hostDebug = flag(debugKey);
+    CFTypeRef signedIDValue = task ? SecTaskCopyValueForEntitlement(task, CFSTR("application-identifier"), NULL) : NULL;
+    NSString *hostSignedID = signedIDValue && CFGetTypeID(signedIDValue) == CFStringGetTypeID() ? [(__bridge NSString *)signedIDValue copy] : @"";
+    if (signedIDValue) CFRelease(signedIDValue);
+    if (task) CFRelease(task);
+    NSBundle *guest = [NSBundle bundleWithPath:[NSBundle.mainBundle.builtInPlugInsPath stringByAppendingPathComponent:@"LiveProcess.appex"]];
+    NSString *xml = guest.executablePath ? getExecutableEntitlementXML(guest.executablePath) : nil;
+    NSDictionary *entitlements = xml ? [NSPropertyListSerialization propertyListWithData:[xml dataUsingEncoding:NSUTF8StringEncoding] options:0 format:nil error:nil] : nil;
+    NSURL *root = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:[LCSharedUtils appGroupID]];
+    NSData *sampleData = root ? [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:@"Library/StrataDiagnostics/guest-memory.json"]] : nil;
+    NSDictionary *sample = sampleData ? [NSJSONSerialization JSONObjectWithData:sampleData options:0 error:nil] : nil;
+    if (![sample isKindOfClass:NSDictionary.class] || ![sample[@"schema"] isEqual:@1]) sample = @{};
+    task_vm_info_data_t vm = {0};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    BOOL footprintReported = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vm, &count) == KERN_SUCCESS;
+    return @{@"footprintReported":@(footprintReported), @"usedMB":@(footprintReported ? vm.phys_footprint / (1024 * 1024) : 0), @"guestSample":sample, @"hostMemory":@(hostMemory), @"hostAddress":@(hostAddress),
+        @"hostDebugMemory":@(hostDebug), @"guestDebugMemory":@([entitlements[debugKey] boolValue]),
+        @"guestMemory":@([entitlements[memoryKey] boolValue]), @"guestAddress":@([entitlements[addressKey] boolValue]),
+        @"hostSignedID":hostSignedID, @"guestSignedID":[entitlements[@"application-identifier"] isKindOfClass:NSString.class] ? entitlements[@"application-identifier"] : @"",
+        @"guestID":guest.bundleIdentifier ?: @"", @"teamID":[LCSharedUtils teamIdentifier] ?: @"",
+        @"availableMB":@(os_proc_available_memory() / (1024 * 1024)), @"physicalMB":@(NSProcessInfo.processInfo.physicalMemory / (1024 * 1024))};
+}
++ (NSObject *)strataStartJITHelper:(NSDictionary *)payload error:(NSError **)error {
+    NSExtension *ext = [NSExtension extensionWithIdentifier:[NSBundle.mainBundle.bundleIdentifier stringByAppendingString:@".JITHelper"] error:error];
+    if (!ext) return nil;
+    NSExtensionItem *item = [NSExtensionItem new];
+    item.userInfo = payload;
+    [ext beginExtensionRequestWithInputItems:@[item] completion:^(NSUUID *request) {}];
+    return ext;
+}
++ (void)strataStopJITHelper:(NSObject *)helper { [(NSExtension *)helper _kill:0]; }
+
+#pragma mark Certificate & password
+
+// Read only the X.509 validity sequence from the imported certificate's DER.
++ (NSDictionary *)strataCertificateMetadata:(NSData *)data password:(NSString *)password {
+    NSString *team = [self getCertTeamIdWithKeyData:data password:password];
+    if (!team.length) return nil;
+    CFArrayRef imported = NULL;
+    OSStatus status = SecPKCS12Import((__bridge CFDataRef)data, (__bridge CFDictionaryRef)@{(__bridge id)kSecImportExportPassphrase:password}, &imported);
+    NSArray *items = CFBridgingRelease(imported);
+    if (status != errSecSuccess || !items.count) return @{@"teamID":team};
+    SecIdentityRef identity = (__bridge SecIdentityRef)items.firstObject[(__bridge id)kSecImportItemIdentity];
+    SecCertificateRef certificate = NULL;
+    if (!identity || SecIdentityCopyCertificate(identity, &certificate) != errSecSuccess) return nil;
+    __block NSData *der = CFBridgingRelease(SecCertificateCopyData(certificate)); CFRelease(certificate);
+    // DER reader returns [tag, contents], refusing indefinite/overflowing lengths.
+    __block NSUInteger cursor = 0;
+    NSArray *(^read)(void) = ^NSArray *{
+        if (cursor + 2 > der.length) return nil;
+        const uint8_t *bytes = der.bytes; uint8_t tag = bytes[cursor++]; NSUInteger length = bytes[cursor++];
+        if (length & 0x80) {
+            NSUInteger count = length & 0x7f; length = 0;
+            if (!count || count > 4 || count > der.length - cursor) return nil;
+            while (count--) length = (length << 8) | bytes[cursor++];
+        }
+        if (length > der.length - cursor) return nil;
+        NSData *content = [der subdataWithRange:NSMakeRange(cursor, length)]; cursor += length;
+        return @[@(tag), content];
+    };
+    NSArray *outer = read(); if ([outer[0] intValue] != 0x30) return nil;
+    der = outer[1]; cursor = 0;
+    NSArray *tbs = read(); if ([tbs[0] intValue] != 0x30) return nil;
+    der = tbs[1]; cursor = 0;
+    NSArray *serial = read(); if ([serial[0] intValue] == 0xa0) serial = read();
+    if ([serial[0] intValue] != 2) return nil;
+    if (!read() || !read()) return nil; // signature algorithm, issuer
+    NSArray *validity = read(); if ([validity[0] intValue] != 0x30) return nil;
+    der = validity[1]; cursor = 0;
+    NSDate *(^date)(NSArray *) = ^NSDate *(NSArray *item) {
+        if (!item || (![item[0] isEqual:@23] && ![item[0] isEqual:@24])) return nil;
+        NSString *text = [[NSString alloc] initWithData:item[1] encoding:NSASCIIStringEncoding];
+        if (![text hasSuffix:@"Z"]) return nil;
+        NSDateFormatter *format = [NSDateFormatter new]; format.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"]; format.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+        format.dateFormat = [item[0] intValue] == 23 ? @"yyMMddHHmmss'Z'" : @"yyyyMMddHHmmss'Z'";
+        format.twoDigitStartDate = [NSDate dateWithTimeIntervalSince1970:-631152000];
+        return [format dateFromString:text];
+    };
+    NSDate *starts = date(read()), *expires = date(read());
+    if (!starts || !expires) return nil;
+    return @{@"teamID":team,@"expires":expires,@"starts":starts};
+}
+
++ (NSData *)certificateData {
+    NSDictionary *identity = [LCSharedUtils strataSigningIdentity];
+    if (identity) return identity[@"p12"];
+    NSUserDefaults* nud = [[NSUserDefaults alloc] initWithSuiteName:[LCSharedUtils appGroupID]];
+    if(!nud) {
+        nud = NSUserDefaults.standardUserDefaults;
+    }
+    return [nud objectForKey:@"LCCertificateData"];
+}
+
+
++ (void)setCertificatePassword:(NSString *)certPassword {
+    [NSUserDefaults.standardUserDefaults setObject:certPassword forKey:@"LCCertificatePassword"];
+    [[[NSUserDefaults alloc] initWithSuiteName:[LCSharedUtils appGroupID]] setObject:certPassword forKey:@"LCCertificatePassword"];
+}
+
+
+#pragma mark Multitasking
++ (NSString *)liveProcessBundleIdentifier {
+    // first check if we have LiveProcess extension in our own bundle
+    NSBundle *liveProcessBundle = [NSBundle bundleWithPath:[NSBundle.mainBundle.builtInPlugInsPath stringByAppendingPathComponent:@"LiveProcess.appex"]];
+    if(liveProcessBundle) {
+        return liveProcessBundle.bundleIdentifier;
+    }
+    
+    // in LC2, attempt to guess LC1's LiveProcess extension
+    NSString *bundleID = [NSString stringWithFormat:@"com.kdt.livecontainer.%@.LiveProcess", LCSharedUtils.teamIdentifier];
+    if([NSExtension extensionWithIdentifier:bundleID error:nil]) {
+        return bundleID;
+    }
+    
+    return nil;
+}
+
++ (void)launchMultitaskGuestApp:(NSString *)displayName completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler {
+    [self launchMultitaskGuestApp:displayName fullScreen:NO completionHandler:completionHandler];
+}
++ (void)launchMultitaskGuestApp:(NSString *)displayName fullScreen:(BOOL)fullScreen completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler {
+    [self launchMultitaskGuestApp:displayName fullScreen:fullScreen waitForJIT:NO completionHandler:completionHandler];
+}
++ (void)launchMultitaskGuestApp:(NSString *)displayName fullScreen:(BOOL)fullScreen waitForJIT:(BOOL)waitForJIT completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler {
+    if(!self.liveProcessBundleIdentifier) {
+        NSError *error = [NSError errorWithDomain:displayName code:2 userInfo:@{NSLocalizedDescriptionKey: @"LiveProcess extension not found. Please reinstall LiveContainer and select Keep Extensions"}];
+        if (completionHandler) completionHandler(nil, error);
+        return;
+    }
+    
+    NSUserDefaults *lcUserDefaults = NSUserDefaults.standardUserDefaults;
+    NSString* bundleId = [lcUserDefaults stringForKey:@"selected"];
+    NSString* dataUUID = [lcUserDefaults stringForKey:@"selectedContainer"];
+    
+    [lcUserDefaults removeObjectForKey:@"selected"];
+    [lcUserDefaults removeObjectForKey:@"selectedContainer"];
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (@available(iOS 16.1, *)) {
+            if(!waitForJIT && !fullScreen && UIApplication.sharedApplication.supportsMultipleScenes && [NSUserDefaults.lcSharedDefaults integerForKey:@"LCMultitaskMode"] == 1) {
+                [MultitaskWindowManager openAppWindowWithDisplayName:displayName dataUUID:dataUUID bundleId:bundleId pidCallback:completionHandler];
+                MultitaskDockManager *dock = [MultitaskDockManager shared];
+                [dock addRunningApp:displayName appUUID:dataUUID view:nil];
+                return;
+            }
+        }
+        
+        UIViewController *rootVC = ((UIWindowScene *)UIApplication.sharedApplication.connectedScenes.anyObject).keyWindow.rootViewController;
+        DecoratedAppSceneViewController *launcherView = [[DecoratedAppSceneViewController alloc] initWindowName:displayName bundleId:bundleId dataUUID:dataUUID rootVC:rootVC fullScreen:fullScreen jitToken:waitForJIT ? NSUUID.UUID.UUIDString : nil];
+        if (fullScreen) {
+            MultitaskDockManager.shared.isCollapsed = YES;
+            [MultitaskDockManager.shared notifyDockCollapseChanged];
+        }
+        // Wire PID callback
+        launcherView.pidAvailableHandler = completionHandler;
+        launcherView.view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
+        launcherView.view.center = rootVC.view.center;
+    });
+}
+
+// Wait for the JIT progress sheet to dismiss before presenting the guest.
++ (void)strataPresentFullscreenGuestWithPID:(int)pid {
+    [self strataPresentFullscreenGuestWithPID:pid attempts:30];
+}
++ (void)strataPresentFullscreenGuestWithPID:(int)pid attempts:(int)attempts {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        UIWindow *window = nil;
+        for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class] || scene.activationState != UISceneActivationStateForegroundActive) continue;
+            for (UIWindow *candidate in scene.windows) if (candidate.isKeyWindow) window = candidate;
+        }
+        UIViewController *root = window.rootViewController;
+        if (root.presentedViewController || !root.view.window) {
+            if (attempts > 0) [self strataPresentFullscreenGuestWithPID:pid attempts:attempts-1];
+            return;
+        }
+        for (UIViewController *child in root.childViewControllers.copy) {
+            if ([child isKindOfClass:DecoratedAppSceneViewController.class]) {
+                DecoratedAppSceneViewController *guest = (id)child;
+                if (guest.appSceneVC.pid == pid) {
+                    if (!guest.appSceneVC.presenter) {
+                        if (attempts > 0) [self strataPresentFullscreenGuestWithPID:pid attempts:attempts-1];
+                    } else { [guest presentImmersiveFrom:root]; }
+                    return;
+                }
+            }
+        }
+    });
+}
+
+// Surface a later script failure on its own guest; successful attachment is not JIT completion.
++ (void)strataShowJITFailure:(NSString *)message forPID:(int)pid {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class] || scene.activationState != UISceneActivationStateForegroundActive) continue;
+            for (UIWindow *window in scene.windows) {
+                if (!window.isKeyWindow) continue;
+                UIViewController *top = window.rootViewController;
+                while (top.presentedViewController) top = top.presentedViewController;
+                if (![top isKindOfClass:DecoratedAppSceneViewController.class] || ((DecoratedAppSceneViewController *)top).appSceneVC.pid != pid) return;
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"JIT preparation failed" message:message preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [top presentViewController:alert animated:YES completion:nil];
+            }
+        }
+    });
+}
+
+#pragma mark Code signing
+
+
++ (void)loadStoreFrameworksWithError2:(NSError **)error {
+    // too lazy to use dispatch_once
+    static BOOL loaded = NO;
+    if (loaded) return;
+
+    void* handle = dlopen("@executable_path/Frameworks/ZSign.dylib", RTLD_GLOBAL);
+    const char* dlerr = dlerror();
+    if (!handle || (uint64_t)handle > 0xf00000000000) {
+        if (dlerr) {
+            *error = [NSError errorWithDomain:NSBundle.mainBundle.bundleIdentifier code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to load ZSign: %s", dlerr]}];
+        } else {
+            *error = [NSError errorWithDomain:NSBundle.mainBundle.bundleIdentifier code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to load ZSign: An unknown error occurred."]}];
+        }
+        NSLog(@"[LC] %s", dlerr);
+        return;
+    }
+    
+    loaded = YES;
+}
+
++ (NSURL *)storeBundlePath {
+    if ([self store] == SideStore) {
+        return [LCSharedUtils.appGroupPath URLByAppendingPathComponent:@"Apps/com.SideStore.SideStore/App.app"];
+    } else {
+        return [LCSharedUtils.appGroupPath URLByAppendingPathComponent:@"Apps/com.rileytestut.AltStore/App.app"];
+    }
+}
+
++ (NSString *)storeInstallURLScheme {
+    if ([self store] == SideStore) {
+        return @"sidestore://install?url=%@";
+    } else {
+        return @"altstore://install?url=%@";
+    }
+}
+
++ (NSProgress *)signAppBundleWithZSign:(NSURL *)path completionHandler:(void (^)(BOOL success, NSError *error))completionHandler {
+    NSError *error;
+
+    // use zsign as our signer~
+    // Load libraries from Documents, yeah
+    [self loadStoreFrameworksWithError2:&error];
+
+    if (error) {
+        completionHandler(NO, error);
+        return nil;
+    }
+
+    NSLog(@"[LC] starting signing...");
+    
+    NSDictionary *identity = [LCSharedUtils strataSigningIdentity];
+    NSData *data = identity ? identity[@"p12"] : self.certificateData;
+    NSString *password = identity ? identity[@"password"] : LCSharedUtils.certificatePassword;
+    NSProgress* ans = [NSClassFromString(@"ZSigner") signWithAppPath:[path path] bundleId:NSBundle.mainBundle.bundleIdentifier cert:data pass:password completionHandler:completionHandler];
+    
+    return ans;
+}
+
++ (NSProgress *)signFilesWithZSignWithURLs:(NSArray<NSURL*>*)urls completionHandler:(void (^)(BOOL success, NSError *error))completionHandler {
+    NSError *error;
+    [self loadStoreFrameworksWithError2:&error];
+    if (error) {
+        completionHandler(NO, error);
+        return nil;
+    }
+    NSMutableArray *paths = [NSMutableArray arrayWithCapacity:[urls count]];
+    for (NSURL *url in urls) {
+        [paths addObject:url.path];
+    }
+    
+    NSDictionary *identity = [LCSharedUtils strataSigningIdentity];
+    NSData *data = identity ? identity[@"p12"] : self.certificateData;
+    NSString *password = identity ? identity[@"password"] : LCSharedUtils.certificatePassword;
+    return [NSClassFromString(@"ZSigner") signMachOPathArr:paths bundleId:NSBundle.mainBundle.bundleIdentifier cert:data
+                                                      pass:password completionHandler:completionHandler];
+}
+
++ (NSString*)getCertTeamIdWithKeyData:(NSData*)keyData password:(NSString*)password {
+    NSError *error;
+    [self loadStoreFrameworksWithError2:&error];
+    if (error) {
+        return nil;
+    }
+    NSString* ans = [NSClassFromString(@"ZSigner") getTeamIdWithCert:keyData pass:password];
+    return ans;
+}
+
++ (int)validateCertificateWithCompletionHandler:(void(^)(int status, NSDate *expirationDate, NSString *organizationalUnitName, NSString *error))completionHandler {
+    NSError *error;
+    NSDictionary *identity = [LCSharedUtils strataSigningIdentity];
+    NSData *certData = identity ? identity[@"p12"] : [LCUtils certificateData];
+    NSString *password = identity ? identity[@"password"] : [LCSharedUtils certificatePassword];
+    if (error) {
+        return -6;
+    }
+    [self loadStoreFrameworksWithError2:&error];
+    int ans = [NSClassFromString(@"ZSigner") checkCert:certData pass:password completionHandler:completionHandler];
+    return ans;
+}
+
+#pragma mark JIT
+
++ (BOOL)isTXMScriptRequired {
+    if (@available(iOS 19.0, *)) {
+        // https://github.com/opa334/Dopamine/commit/e8438b4a64ead3997d2c70a575431cb1b4070fb9
+        io_registry_entry_t memory_map = IORegistryEntryFromPath(0, "IODeviceTree:/chosen/memory-map");
+        if (memory_map == IO_OBJECT_NULL)
+            return NO;
+        NSArray *keys = (__bridge NSArray *)IORegistryEntryCreateCFProperty(memory_map, CFSTR(kIORegistryEntryPropertyKeysKey), 0, 0);
+        IOObjectRelease(memory_map);
+        return keys && [keys containsObject:@"TXM"];
+    }
+    return NO;
+}
+
++ (NSString *)base64EncodedUniversalJITScript {
+    static dispatch_once_t onceToken;
+    static NSString *script;
+    dispatch_once(&onceToken, ^{
+        NSData *data = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"universal" ofType:@"js"]];
+        script = [data base64EncodedStringWithOptions:0];
+    });
+    return script;
+}
+
+#pragma mark Setup
+
++ (Store) store {
+    static Store ans;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // use uttype to accurately detect store
+        if([UTType typeWithIdentifier:[NSString stringWithFormat:@"io.sidestore.Installed.%@", NSBundle.mainBundle.bundleIdentifier]]) {
+            ans = SideStore;
+        } else if ([UTType typeWithIdentifier:[NSString stringWithFormat:@"io.altstore.Installed.%@", NSBundle.mainBundle.bundleIdentifier]]) {
+            ans = AltStore;
+        } else {
+            ans = Unknown;
+        }
+        
+        if(ans != Unknown) {
+            return;
+        }
+        
+        if([[LCSharedUtils appGroupID] containsString:@"AltStore"] && ![[LCSharedUtils appGroupID] isEqualToString:@"group.com.rileytestut.AltStore"]) {
+            ans = AltStore;
+        } else if ([[LCSharedUtils appGroupID] containsString:@"SideStore"] && ![[LCSharedUtils appGroupID] isEqualToString:@"group.com.SideStore.SideStore"]) {
+            ans = SideStore;
+        } else if (![[LCSharedUtils appGroupID] containsString:@"Unknown"] ) {
+            ans = ADP;
+        } else {
+            ans = Unknown;
+        }
+    });
+    return ans;
+}
+
++ (NSString *)appUrlScheme {
+    return NSBundle.mainBundle.infoDictionary[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0];
+}
+
++ (BOOL)isAppGroupAltStoreLike {
+    return [LCSharedUtils.appGroupID containsString:@"SideStore"] || [LCSharedUtils.appGroupID containsString:@"AltStore"];
+}
+
++ (void)changeMainExecutableTo:(NSString *)exec error:(NSError **)error {
+    NSURL *infoPath = [LCSharedUtils.appGroupPath URLByAppendingPathComponent:@"Apps/com.kdt.livecontainer/App.app/Info.plist"];
+    NSMutableDictionary *infoDict = [NSMutableDictionary dictionaryWithContentsOfURL:infoPath];
+    if (!infoDict) return;
+
+    infoDict[@"CFBundleExecutable"] = exec;
+    [infoDict writeToURL:infoPath error:error];
+}
+
++ (void)validateJITLessSetupWithCompletionHandler:(void (^)(BOOL success, NSError *error))completionHandler {
+    // Verify that the certificate is usable
+    // Create a test app bundle
+    NSString *path = NSTemporaryDirectory();
+    [NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *tmpLibPath = [path stringByAppendingPathComponent:@"TestJITLess.dylib"];
+    [NSFileManager.defaultManager copyItemAtPath:[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/TestJITLess.dylib"] toPath:tmpLibPath error:nil];
+
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    __block bool signSuccess = false;
+    __block NSError* signError = nil;
+    
+    // Sign the test app bundle
+
+    [LCUtils signFilesWithZSignWithURLs:@[[NSURL fileURLWithPath:tmpLibPath]]
+                  completionHandler:^(BOOL success, NSError *_Nullable error) {
+        signSuccess = success;
+        signError = error;
+        dispatch_semaphore_signal(sema);
+    }];
+
+    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if(!signSuccess) {
+            completionHandler(NO, signError);
+        } else if (checkCodeSignature([tmpLibPath UTF8String])) {
+            completionHandler(YES, signError);
+        } else {
+            completionHandler(NO, [NSError errorWithDomain:NSBundle.mainBundle.bundleIdentifier code:2 userInfo:@{NSLocalizedDescriptionKey: @"lc.signer.latestCertificateInvalidErr"}]);
+        }
+        [NSFileManager.defaultManager removeItemAtPath:tmpLibPath error:nil];
+    });
+}
+
++ (NSURL *)archiveIPAWithBundleName:(NSString*)newBundleName includingExtraInfoDict:(NSDictionary *)extraInfoDict error:(NSError **)error {
+    if (*error) return nil;
+
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSURL *bundlePath = NSBundle.mainBundle.bundleURL;
+
+    NSURL *tmpPath = manager.temporaryDirectory;
+
+    NSURL *tmpPayloadPath = [tmpPath URLByAppendingPathComponent:@"LiveContainer2/Payload"];
+    [manager removeItemAtURL:tmpPayloadPath error:nil];
+    [manager createDirectoryAtURL:tmpPayloadPath withIntermediateDirectories:YES attributes:nil error:error];
+    if (*error) return nil;
+    
+    NSURL *tmpIPAPath = [tmpPath URLByAppendingPathComponent:[NSString stringWithFormat:@"%@.ipa", newBundleName]];
+    
+
+    [manager copyItemAtURL:bundlePath toURL:[tmpPayloadPath URLByAppendingPathComponent:@"App.app"] error:error];
+    if (*error) return nil;
+    
+    NSURL *infoPath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app/Info.plist"];
+    NSMutableDictionary *infoDict = [NSMutableDictionary dictionaryWithContentsOfURL:infoPath];
+    if (!infoDict) return nil;
+
+    infoDict[@"CFBundleDisplayName"] = newBundleName;
+    infoDict[@"CFBundleName"] = newBundleName;
+    infoDict[@"CFBundleIdentifier"] = [NSString stringWithFormat:@"com.kdt.%@", newBundleName];
+    infoDict[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0] = [newBundleName lowercaseString];
+    while([infoDict[@"CFBundleURLTypes"] count] > 1) {
+        [infoDict[@"CFBundleURLTypes"] removeLastObject];
+    }
+    [infoDict removeObjectForKey:@"UTExportedTypeDeclarations"];
+    infoDict[@"CFBundleIconName"] = @"AppIconGrey";
+    if (infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
+        infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconGrey";
+    }
+    infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconGrey60x60";
+    
+    if (infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
+        infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconGrey";
+    }
+    infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconGrey60x60";
+    infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][1] = @"AppIconGrey76x76";
+    [infoDict addEntriesFromDictionary:extraInfoDict];
+    
+    // reset a executable name so they don't look the same on the log
+    NSURL* appBundlePath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app"];
+    
+    NSURL* execFromPath = [appBundlePath URLByAppendingPathComponent:infoDict[@"CFBundleExecutable"]];
+    infoDict[@"CFBundleExecutable"] = newBundleName;
+    NSURL* execToPath = [appBundlePath URLByAppendingPathComponent:infoDict[@"CFBundleExecutable"]];
+    
+    // MARK: patch main executable
+    // we remove the teamId after app group id so it can be correctly signed by AltSign.
+    NSString* entitlementXML = getExecutableEntitlementXML(NSBundle.mainBundle.executablePath);
+    NSData *plistData = [entitlementXML dataUsingEncoding:NSUTF8StringEncoding];
+    NSMutableDictionary *dict = [NSPropertyListSerialization propertyListWithData:plistData
+                                                                          options:NSPropertyListMutableContainers
+                                                                           format:nil
+                                                                            error:error];
+    if(*error) {
+        return nil;
+    }
+    
+    NSString* teamId = dict[@"com.apple.developer.team-identifier"];
+    if(![teamId isKindOfClass:NSString.class]) {
+        *error = [NSError errorWithDomain:@"archiveIPAWithBundleName" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"com.apple.developer.team-identifier is not a string!"}];
+        return nil;
+    }
+    infoDict[@"PrimaryLiveContainerTeamId"] = teamId;
+    NSArray* appGroupsToFind = @[
+        @"group.com.SideStore.SideStore",
+        @"group.com.rileytestut.AltStore",
+    ];
+    
+    // remove the team id prefix in app group id added by SideStore/AltStore
+    for(NSString* appGroup in appGroupsToFind) {
+        NSUInteger appGroupCount = [dict[@"com.apple.security.application-groups"] count];
+        for(int i = 0; i < appGroupCount; ++i) {
+            NSString* targetAppGroup = [NSString stringWithFormat:@"%@.%@", appGroup, teamId];
+            if([dict[@"com.apple.security.application-groups"][i] isEqualToString:targetAppGroup]) {
+                dict[@"com.apple.security.application-groups"][i] = appGroup;
+            }
+        }
+    }
+    
+    // set correct application-identifier
+    dict[@"application-identifier"] = [NSString stringWithFormat:@"%@.%@", teamId, infoDict[@"CFBundleIdentifier"]];
+    
+    // For TrollStore
+    NSString* containerId = dict[@"com.apple.private.security.container-required"];
+    if(containerId) {
+        dict[@"com.apple.private.security.container-required"] = infoDict[@"CFBundleIdentifier"];
+    }
+    
+    
+    // We have to change executable's UUID so iOS won't consider 2 executables the same
+    NSString* errorChangeUUID = LCParseMachO([execFromPath.path UTF8String], false, ^(const char *path, struct mach_header_64 *header, int fd, void* filePtr) {
+        LCChangeMachOUUID(header);
+    });
+    if (errorChangeUUID) {
+        NSMutableDictionary* details = [NSMutableDictionary dictionary];
+        [details setValue:errorChangeUUID forKey:NSLocalizedDescriptionKey];
+        // populate the error object with the details
+        *error = [NSError errorWithDomain:@"world" code:200 userInfo:details];
+        NSLog(@"[LC] %@", errorChangeUUID);
+        return nil;
+    }
+    
+    NSData* newEntitlementData = [NSPropertyListSerialization dataWithPropertyList:dict format:NSPropertyListXMLFormat_v1_0 options:0 error:error];
+    [LCUtils loadStoreFrameworksWithError2:error];
+    BOOL adhocSignSuccess = [NSClassFromString(@"ZSigner") adhocSignMachOAtPath:execFromPath.path bundleId:infoDict[@"CFBundleIdentifier"] entitlementData:newEntitlementData];
+    if (!adhocSignSuccess) {
+        *error = [NSError errorWithDomain:@"archiveIPAWithBundleName" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Failed to adhoc sign main executable!"}];
+        return nil;
+    }
+    
+    // MARK: archive bundle
+    
+    [manager moveItemAtURL:execFromPath toURL:execToPath error:error];
+    if (*error) {
+        NSLog(@"[LC] %@", *error);
+        return nil;
+    }
+    
+    // we don't care about errors when removing unnecessary files. errors occur probably because the file does not exist
+    // we remove the extension
+    [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"PlugIns"] error:nil];
+    // remove all sidestore stuff
+    if([NSUserDefaults sideStoreExist]) {
+        [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"Frameworks/SideStoreSupport.framework"] error:nil];
+        [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"Frameworks/SideStore.framework"] error:nil];
+        [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"Frameworks/SideStoreApp.framework"] error:nil];
+        [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"Intents.intentdefinition"] error:nil];
+        [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"ViewApp.intentdefinition"] error:nil];
+        [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"Metadata.appintents"] error:nil];
+        [infoDict removeObjectForKey:@"INIntentsSupported"];
+        [infoDict removeObjectForKey:@"NSUserActivityTypes"];
+    }
+    
+    [infoDict writeToURL:infoPath error:error];
+    
+    dlopen("/System/Library/PrivateFrameworks/PassKitCore.framework/PassKitCore", RTLD_GLOBAL);
+    NSData *zipData = [[NSClassFromString(@"PKZipArchiver") new] zippedDataForURL:tmpPayloadPath.URLByDeletingLastPathComponent];
+    if (!zipData) return nil;
+
+    [manager removeItemAtURL:tmpPayloadPath error:error];
+    if (*error) return nil;
+    
+    if([manager fileExistsAtPath:tmpIPAPath.path]) {
+        [manager removeItemAtURL:tmpIPAPath error:error];
+        if (*error) return nil;
+    }
+
+    [zipData writeToURL:tmpIPAPath options:0 error:error];
+    if (*error) return nil;
+
+    return tmpIPAPath;
+}
+
++ (NSString *)getVersionInfo {
+    return [NSString stringWithFormat:@"Version %@-%@",
+            NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"],
+            NSBundle.mainBundle.infoDictionary[@"LCVersionInfo"]];
+}
+
++ (NSData*)bookmarkForURL:(NSURL*) url {
+    return [url bookmarkDataWithOptions:(1<<11) includingResourceValuesForKeys:0 relativeToURL:0 error:0];
+}
+
+
+@end

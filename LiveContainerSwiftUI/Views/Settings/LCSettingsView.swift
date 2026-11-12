@@ -1,0 +1,829 @@
+//
+//  LCSettingsView.swift
+//  LiveContainerSwiftUI
+//
+//  Created by s s on 2024/8/21.
+//
+
+import Foundation
+import SwiftUI
+import UserNotifications
+
+enum JITEnablerType : Int, CaseIterable, Identifiable {
+    var id: Int { rawValue }
+    case SideJITServer = 0
+    case StikJIT = 1
+    case JITStreamerEBLegacy = 2
+    case StikJITLC = 3
+    case SideStore = 4
+    case StosDebug = 5
+    case StosDebugLC = 6
+    case BuiltIn = 7
+    
+    var displayName: String {
+        switch self {
+        case .BuiltIn: "Built-in JIT (LocalDevVPN)"
+        case .StikJIT: "StikDebug"
+        case .StikJITLC: "StikDebug (Another LiveContainer/Multitask)"
+        case .StosDebug: "StosDebug"
+        case .StosDebugLC: "StosDebug (Another LiveContainer/Multitask)"
+        case .SideStore: "SideStore"
+        case .JITStreamerEBLegacy: "JitStreamer-EB (Relaunch)"
+        case .SideJITServer: "SideJITServer/JITStreamer 2.0"
+        }
+    }
+}
+
+struct LCSettingsView: View {
+    @State var errorShow = false
+    @State var errorInfo = ""
+    @State var successShow = false
+    @State var successInfo = ""
+
+    @State private var certificateDataFound = false
+    
+    @StateObject private var certificateImportAlert = YesNoHelper()
+    @StateObject private var certificateImportFromBuiltInSideStoreAlert = YesNoHelper()
+    @StateObject private var certificateRemoveAlert = YesNoHelper()
+    @StateObject private var certificateImportFileAlert = AlertHelper<URL>()
+    @StateObject private var certificateImportPasswordAlert = InputHelper()
+    // onAppear / onChange 可能投递同一个文件 URL 两次，避免重复弹密码框。
+    @State private var lastHandledCertificatePath: String? = nil
+    
+    @AppStorage("LCFrameShortcutIcons") var frameShortIcon = false
+    @AppStorage("LCSwitchAppWithoutAsking") var silentSwitchApp = false
+    @AppStorage("LCOpenWebPageWithoutAsking") var silentOpenWebPage = false
+    @AppStorage("LCDontSignApp", store: LCUtils.appGroupUserDefault) var dontSignApp = false
+    @AppStorage("LCStrictHiding", store: LCUtils.appGroupUserDefault) var strictHiding = false
+    @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
+    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
+    
+    @AppStorage("LCSideJITServerAddress", store: LCUtils.appGroupUserDefault) var sideJITServerAddress : String = ""
+    @AppStorage("LCDeviceUDID", store: LCUtils.appGroupUserDefault) var deviceUDID: String = ""
+    @AppStorage("LCJITEnablerType", store: LCUtils.appGroupUserDefault) var JITEnabler: JITEnablerType = .BuiltIn
+    
+    @State var store : Store = .Unknown
+    
+    @AppStorage("LCLoadTweaksToSelf") var injectToLCItelf = false
+    @AppStorage("LCIgnoreJITOnLaunch") var ignoreJITOnLaunch = false
+    @AppStorage("LCSelected32BitEmulator", store: LCUtils.appGroupUserDefault) var selected32BitEmulator : String = ""
+    @AppStorage("LCKeepSelectedWhenQuit") var keepSelectedWhenQuit = false
+    @AppStorage("LCWaitForDebugger") var waitForDebugger = false
+    @AppStorage("LCSharePrivateDataWithLiveProcess") var sharePrivateDataWithLiveProcess = false
+    @AppStorage("BKNoWatchdogs") var disableLiveProcessWatchdog = false
+    @AppStorage("StrataFloatingMenuEnabled", store: LCUtils.appGroupUserDefault) var floatingMenu = false
+    
+    @EnvironmentObject private var sharedModel : SharedModel
+    
+    @State private var isViewAppeared = false
+    
+    let storeName = LCUtils.getStoreName()
+    
+    init() {
+        _certificateDataFound = State(initialValue: LCSharedUtils.certificatePassword() != nil)
+        _store = State(initialValue: LCUtils.store())
+    }
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Strata") {
+                    StrataCreditsButton(location: "settings.about")
+                    NavigationLink("App Extensions") { StrataExtensionsView(apps: sharedModel.apps) }
+                    NavigationLink("iPhone Apps") { StrataPhoneAppsView() }
+                    NavigationLink("Refresh") { StrataAutoRefreshSettings() }
+                    if #available(iOS 16.0, *) {
+                    NavigationLink(LCStr("Runtime Manager · Strata %@", "Runtime Manager · Strata %@", StrataVersion.display)) { StrataRuntimeCenter(apps: sharedModel.apps + sharedModel.hiddenApps, launch: { app in Task { do {
+                        if app.uiIsLocked && !sharedModel.isHiddenAppUnlocked { guard try await LCUtils.authenticateUser() else { return } }
+                        try await app.runApp()
+                    } catch { errorInfo = error.localizedDescription; errorShow = true } } }, manage: { _ in sharedModel.selectedTab = .apps }) }
+                    NavigationLink("LocalSigner · Signing Identity") { StrataIdentitySettings() }
+                    }
+                }
+                if sharedModel.multiLCStatus != 2 {
+                    Section{
+                        if !certificateDataFound {
+                            Button {
+                                Task{ await importCertificate() }
+                            } label: {
+                                Text("lc.settings.importCertificate".loc)
+                            }
+                        } else {
+                            Button {
+                                Task{ await removeCertificate() }
+                            } label: {
+                                Text("lc.settings.removeCertificate".loc)
+                            }
+                        }
+                        if store == .AltStore || store == .SideStore {
+                            Button {
+                                Task{ await importCertificateFromSideStore() }
+                            } label: {
+                                if certificateDataFound {
+                                    Text("lc.settings.refreshCertificateFromStore %@".localizeWithFormat(storeName))
+                                } else {
+                                    Text("lc.settings.importCertificateFromStore %@".localizeWithFormat(storeName))
+                                }
+                            }
+                        }
+                        
+                        NavigationLink {
+                            LCJITLessDiagnoseView()
+                        } label: {
+                            Text("lc.settings.jitlessDiagnose".loc)
+                        }
+
+                    } header: {
+                        Text("lc.settings.jitLess".loc)
+                    } footer: {
+                        Text("lc.settings.jitLessDesc".loc)
+                    }
+                }
+                if (store != .Unknown && store != .ADP) || LCUtils.isAppGroupAltStoreLike() {
+                    Section{
+                        NavigationLink {
+                            LCMultiLCManagementView()
+                        } label: {
+                            if sharedModel.multiLCStatus == 0 {
+                                Text("lc.settings.multiLC".loc)
+                            } else if sharedModel.multiLCStatus == 2 {
+                                Text("lc.settings.multiLCIsSecond".loc)
+                            }
+                            
+                        }
+                        .disabled(sharedModel.multiLCStatus == 2)
+                        
+                        if(sharedModel.multiLCStatus == 2) {
+                            NavigationLink {
+                                LCJITLessDiagnoseView()
+                            } label: {
+                                Text("lc.settings.jitlessDiagnose".loc)
+                            }
+                        }
+                    } footer: {
+                        Text("lc.settings.multiLCDesc".loc)
+                    }
+                }
+                
+                if #available(iOS 16.1, *) {
+                    Section {
+                        NavigationLink {
+                            LCMultitaskSettingView()
+                        } label: {
+                            Text("lc.appBanner.multitask".loc)
+                        }
+                    } footer: {
+                        Text("lc.settings.multitaskDesc".loc)
+                    }
+                }
+                
+                Section {
+                    if JITEnabler == .SideJITServer || JITEnabler == .JITStreamerEBLegacy {
+                        HStack {
+                            Text("lc.settings.JitAddress".loc)
+                            Spacer()
+                            TextField(JITEnabler == .SideJITServer ? "http://x.x.x.x:8080" : "http://[fd00::]:9172", text: $sideJITServerAddress)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    if JITEnabler == .SideJITServer {
+                        HStack {
+                            Text("lc.settings.JitUDID".loc)
+                            Spacer()
+                            TextField("", text: $deviceUDID)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    Picker(selection: $JITEnabler) {
+                        ForEach(JITEnablerType.allCases) { enablerType in
+                            Text(enablerType.displayName).tag(enablerType)
+                        }
+                    } label: {
+                        Text("lc.settings.jitEnabler".loc)
+                    }
+
+                } header: {
+                    Text("JIT")
+                } footer: {
+                    Text("lc.settings.JitDesc".loc)
+                }
+                
+                Section { NavigationLink("Automatic refresh") { StrataAutoRefreshSettings() }
+                    NavigationLink("Memory and signing permissions") { StrataMemorySettings() } }
+                Section {
+                    Picker(selection: $selected32BitEmulator) {
+                        ForEach(sharedModel.arm32EmuApps, id: \.self) { app in
+                            Text("lc.common.none".loc).tag("")
+                            Text(app.appInfo.displayName()).tag(app.appInfo.relativeBundlePath!)
+                        }
+                    } label: {
+                        Text("lc.settings.selected32BitEmulator".loc)
+                    }
+                }
+                
+                Section{
+                    Toggle(isOn: $dynamicColors) {
+                        Text("lc.settings.dynamicColors".loc)
+                    }
+                    if #available(iOS 18.0, *) {
+                        Toggle(isOn: $darkModeIcon) {
+                            Text("lc.settings.darkModeIcon".loc)
+                        }
+                    }
+                    
+                } header: {
+                    Text("lc.settings.interface".loc)
+                } footer: {
+                    Text("lc.settings.dynamicColors.desc".loc)
+                }
+                Section{
+                    Toggle(isOn: $floatingMenu) {
+                        Text("strata.settings.floatingMenu".loc)
+                    }
+                    Button {
+                        // 访客进程把启动结果写在 App Group 里，这里直接读，
+                        // 打不开悬浮菜单时能立刻看到卡在哪一步，不用连 Xcode。
+                        UIPasteboard.general.string = floatingMenuDiagnostics()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(floatingMenuStatusText())
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                            Text(LCStr("strata.settings.floatingMenuCopy", "复制诊断信息"))
+                                .font(.footnote)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    Text("strata.settings.floatingMenuSection".loc)
+                } footer: {
+                    Text("strata.settings.floatingMenuDesc".loc)
+                }
+                Section{
+                    Toggle(isOn: $frameShortIcon) {
+                        Text("lc.settings.FrameIcon".loc)
+                    }
+                } header: {
+                    Text("lc.common.miscellaneous".loc)
+                } footer: {
+                    Text("lc.settings.FrameIconDesc".loc)
+                }
+                
+                Section {
+                    Toggle(isOn: $silentSwitchApp) {
+                        Text("lc.settings.silentSwitchApp".loc)
+                    }
+                } footer: {
+                    Text("lc.settings.silentSwitchAppDesc".loc)
+                }
+                
+                Section {
+                    Toggle(isOn: $silentOpenWebPage) {
+                        Text("lc.settings.silentOpenWebPage".loc)
+                    }
+                } footer: {
+                    Text("lc.settings.silentOpenWebPageDesc".loc)
+                }
+                
+                if sharedModel.isHiddenAppUnlocked {
+                    Section {
+                        Toggle(isOn: $strictHiding) {
+                            Text("lc.settings.strictHiding".loc)
+                        }
+                    } footer: {
+                        Text("lc.settings.strictHidingDesc".loc)
+                    }
+                }
+                
+                Section {
+                    Toggle(isOn: $dontSignApp) {
+                        Text("lc.settings.dontSign".loc)
+                    }
+                } footer: {
+                    Text("lc.settings.dontSignDesc".loc)
+                }
+
+                Section {
+                    Button {
+                        clearNotifications()
+                    } label: {
+                        Text("lc.settings.clearNotifications".loc)
+                    }
+                }
+
+                Section {
+                    if sharedModel.multiLCStatus != 2 {
+                        NavigationLink {
+                            LCStorageManagementView()
+                        } label: {
+                            Text("lc.settings.storageManagement".loc)
+                        }
+                    }
+                }
+                
+                Section {
+                    HStack {
+                        Image("GitHub")
+                        Button("LiveContainer/LiveContainer") {
+                            openGitHub()
+                        }
+                    }
+                    HStack {
+                        Image("Twitter")
+                        Button("khanhduytran0") {
+                            openTwitter()
+                        }
+                    }
+                    HStack {
+                        Image("GitHub")
+                        Button("Huge_Black") {
+                            openGitHub2()
+                        }
+                    }
+                } header: {
+                    Text("lc.settings.about".loc)
+                } footer: {
+                    Text("lc.settings.warning".loc)
+                }
+                
+                VStack{
+                    Text(LCUtils.getVersionInfo())
+                        .foregroundStyle(.gray)
+                        .onTapGesture(count: 5) {
+                            sharedModel.developerMode = true
+                        }
+                }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .background(Color(UIColor.systemGroupedBackground))
+                    .listRowInsets(EdgeInsets())
+                
+                if sharedModel.developerMode {
+                    Section {
+                        Toggle(isOn: $injectToLCItelf) {
+                            Text("lc.settings.injectLCItself".loc)
+                        }
+                        Toggle(isOn: $ignoreJITOnLaunch) {
+                            Text("Ignore JIT on Launching App")
+                        }
+                        Toggle(isOn: $keepSelectedWhenQuit) {
+                            Text("Keep Selected App when Quit")
+                        }
+                        Toggle(isOn: $waitForDebugger) {
+                            Text("Wait For Debugger")
+                        }
+                        Toggle(isOn: $sharePrivateDataWithLiveProcess) {
+                            Text("Allow Private Data access from LiveProcess")
+                        }
+                        Toggle(isOn: $disableLiveProcessWatchdog) {
+                            Text("Disable LiveProcess watchdog termination")
+                        }
+                        Button {
+                            export()
+                        } label: {
+                            Text("Export Cert")
+                        }
+                        Button {
+                            exportDyld()
+                        } label: {
+                            Text("Export Dyld")
+                        }
+                        Button {
+                            Task { await nukeSideStore() }
+                        } label: {
+                            Text("Nuke SideStore")
+                        }
+                        Button {
+                            exportMainBundle()
+                        } label: {
+                            Text("Export Main Bundle")
+                        }
+                        Button {
+                            resetSymbolOffsets()
+                        } label: {
+                            Text("Reset Symbol Offsets")
+                        }
+                        Button {
+                            presentFLEXOverlay()
+                        } label: {
+                            Text("Show FLEX Overlay")
+                        }
+                        .disabled(NSClassFromString("FLEXManager") == nil)
+                    } header: {
+                        Text("Developer Settings")
+                    } footer: {
+                        Text("lc.settings.injectLCItselfDesc".loc)
+                    }
+                }
+            }
+            .navigationBarTitle("lc.tabView.settings".loc)
+            .alert("lc.common.error".loc, isPresented: $errorShow){
+            } message: {
+                Text(errorInfo)
+            }
+            .alert("lc.common.success".loc, isPresented: $successShow){
+            } message: {
+                Text(successInfo.loc)
+            }
+            .alert("lc.settings.importCertificate".loc, isPresented: $certificateImportAlert.show) {
+                Button {
+                    certificateImportAlert.close(result: true)
+                } label: {
+                    Text("lc.common.ok".loc)
+                }
+
+                Button("lc.common.cancel".loc, role: .cancel) {
+                    certificateImportAlert.close(result: false)
+                }
+            } message: {
+                Text("lc.settings.importCertificateDesc".loc)
+            }
+            .alert("lc.settings.removeCertificate".loc, isPresented: $certificateRemoveAlert.show) {
+                Button(role: .destructive) {
+                    certificateRemoveAlert.close(result: true)
+                } label: {
+                    Text("lc.common.ok".loc)
+                }
+
+                Button("lc.common.cancel".loc, role: .cancel) {
+                    certificateRemoveAlert.close(result: false)
+                }
+            } message: {
+                Text("lc.settings.removeCertificateDesc".loc)
+            }
+            .alert("lc.settings.importCertFromBuiltinSideStore".loc, isPresented: $certificateImportFromBuiltInSideStoreAlert.show) {
+                Button {
+                    certificateImportFromBuiltInSideStoreAlert.close(result: true)
+                } label: {
+                    Text("lc.common.ok".loc)
+                }
+                Button("lc.common.cancel".loc, role: .cancel) {
+                    certificateImportFromBuiltInSideStoreAlert.close(result: false)
+                }
+            } message: {
+                Text("lc.settings.importCertFromBuiltinSideStoreDesc".loc)
+            }
+            .betterFileImporter(isPresented: $certificateImportFileAlert.show, types: [.p12, .pfx, .pkcs12, .item], multiple: false, callback: { fileUrls in
+                certificateImportFileAlert.close(result: fileUrls.first)
+            }, onDismiss: {
+                certificateImportFileAlert.close(result: nil)
+            })
+            .textFieldAlert(
+                isPresented: $certificateImportPasswordAlert.show,
+                title: "lc.settings.importCertificateInputPassword".loc,
+                text: $certificateImportPasswordAlert.initVal,
+                placeholder: "",
+                action: { newText in
+                    certificateImportPasswordAlert.close(result: newText)
+                },
+                actionCancel: {_ in
+                    certificateImportPasswordAlert.close(result: nil)
+                    certificateImportPasswordAlert.show = false
+                }
+            )
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+        .onAppear() {
+            if !isViewAppeared {
+                guard sharedModel.selectedTab == .settings, let link = sharedModel.deepLink else { return }
+                sharedModel.deepLink = nil
+                handleURL(url: link)
+                isViewAppeared = true
+            }
+        }
+        .onChange(of: sharedModel.deepLink) { link in
+            guard sharedModel.selectedTab == .settings, let link else { return }
+            sharedModel.deepLink = nil
+            handleURL(url: link)
+        }
+    }
+    
+    /// 访客进程（LCOrbitCore）把启动判定结果写进 App Group，宿主这侧直接读出来。
+    func floatingMenuStatusText() -> String {
+        guard let status = LCUtils.appGroupUserDefault.dictionary(forKey: "StrataOrbitStatus"),
+              let phase = status["phase"] as? String else {
+            return LCStr("strata.settings.floatingMenuNoReport",
+                         "还没有访客 App 上报状态，打开任意 App 后回到这里查看。")
+        }
+        let label: String
+        switch phase {
+        case "started": label = LCStr("strata.orbit.phase.started", "已启动")
+        case "switch-off": label = LCStr("strata.orbit.phase.switchOff", "开关未开启")
+        case "not-guest": label = LCStr("strata.orbit.phase.notGuest", "非访客进程（Strata 主界面）")
+        default: label = phase
+        }
+        let guest = status["guest"] as? String ?? ""
+        return guest.isEmpty ? label : "\(label) · \(guest)"
+    }
+
+    func floatingMenuDiagnostics() -> String {
+        let status = LCUtils.appGroupUserDefault.dictionary(forKey: "StrataOrbitStatus") ?? [:]
+        var lines = ["Strata floating menu diagnostics", "switch = \(floatingMenu)"]
+        for key in ["phase", "detail", "guest", "date"] {
+            lines.append("\(key) = \(String(describing: status[key] ?? "-"))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func openGitHub() {
+        UIApplication.shared.open(URL(string: "https://github.com/LiveContainer/LiveContainer")!)
+    }
+    
+    func openGitHub2() {
+        UIApplication.shared.open(URL(string: "https://github.com/hugeBlack")!)
+    }
+    
+    func openTwitter() {
+        UIApplication.shared.open(URL(string: "https://twitter.com/khanhduytran0")!)
+    }
+
+    func clearNotifications() {
+        let notificationCenter = UNUserNotificationCenter.current()
+        notificationCenter.removeAllDeliveredNotifications()
+        notificationCenter.removeAllPendingNotificationRequests()
+        if #available(iOS 16.0, *) {
+            notificationCenter.setBadgeCount(0)
+        } else {
+            UIApplication.shared.applicationIconBadgeNumber = 0
+        }
+    }
+
+    func export() {
+        let fileManager = FileManager.default
+        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        
+        // 1. Copy embedded.mobileprovision from the main bundle to Documents
+        if let embeddedURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") {
+            let destinationURL = documentsURL.appendingPathComponent("embedded.mobileprovision")
+            do {
+                try fileManager.copyItem(at: embeddedURL, to: destinationURL)
+                print("Successfully copied embedded.mobileprovision to Documents.")
+            } catch {
+                print("Error copying embedded.mobileprovision: \(error)")
+            }
+        } else {
+            print("embedded.mobileprovision not found in the main bundle.")
+        }
+        
+        // 2. Read "certData" from UserDefaults and save to cert.p12 in Documents
+        if let certData = LCUtils.certificateData() {
+            let certFileURL = documentsURL.appendingPathComponent("cert.p12")
+            do {
+                try certData.write(to: certFileURL)
+                print("Successfully wrote certData to cert.p12 in Documents.")
+            } catch {
+                print("Error writing certData to cert.p12: \(error)")
+            }
+        } else {
+            print("certData not found in UserDefaults.")
+        }
+        
+        // 3. Read "certPassword" from UserDefaults and save to pass.txt in Documents
+        if let certPassword = LCSharedUtils.certificatePassword() {
+            let passwordFileURL = documentsURL.appendingPathComponent("pass.txt")
+            do {
+                try certPassword.write(to: passwordFileURL, atomically: true, encoding: .utf8)
+                print("Successfully wrote certPassword to pass.txt in Documents.")
+            } catch {
+                print("Error writing certPassword to pass.txt: \(error)")
+            }
+        } else {
+            print("certPassword not found in UserDefaults.")
+        }
+    }
+    
+    func exportMainBundle() {
+        let url = Bundle.main.bundleURL
+        let fileManager = FileManager.default
+        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        do {
+            let destinationURL = documentsURL.appendingPathComponent(url.lastPathComponent)
+            try fileManager.copyItem(at: url, to: destinationURL)
+            print("Successfully copied main bundle to Documents.")
+        } catch {
+            print("Error copying main bundle \(error)")
+        }
+    }
+    
+    func resetSymbolOffsets() {
+        LCUtils.appGroupUserDefault.removeObject(forKey: "symbolOffsetCache")
+    }
+    
+    func presentFLEXOverlay() {
+        let manager = (NSClassFromString("FLEXManager") as? NSObject.Type)?.perform(NSSelectorFromString("sharedManager"))
+            .takeUnretainedValue() as? NSObject
+        manager?.perform(NSSelectorFromString("showExplorer"))
+    }
+    
+    func importCertificate() async {
+        guard let doImport = await certificateImportAlert.open(), doImport else { return }
+        guard let certificateURL = await certificateImportFileAlert.open() else { return }
+        await importCertificateFile(certificateURL)
+    }
+
+    /// 导入 .p12 / .pfx / .pkcs12。三处关键修复：安全作用域访问、空密码自动回退、
+    /// 以及导入成功后写入 LCAppGroupID（否则访客 App 读不到证书）。
+    func importCertificateFile(_ certificateURL: URL) async {
+        let ext = certificateURL.pathExtension.lowercased()
+        guard ["p12", "pfx", "pkcs12"].contains(ext) else {
+            errorInfo = LCStr("strata.cert.unsupportedType",
+                              "只能导入 .p12、.pfx 或 .pkcs12 证书文件：%@",
+                              certificateURL.lastPathComponent)
+            errorShow = true
+            return
+        }
+
+        guard let certificatePassword = await certificateImportPasswordAlert.open() else { return }
+
+        let needsScope = certificateURL.startAccessingSecurityScopedResource()
+        let certificateData: Data
+        do {
+            certificateData = try Data(contentsOf: certificateURL)
+        } catch {
+            if needsScope { certificateURL.stopAccessingSecurityScopedResource() }
+            errorInfo = error.localizedDescription
+            errorShow = true
+            return
+        }
+        if needsScope { certificateURL.stopAccessingSecurityScopedResource() }
+
+        // 安装器导出的 PKCS#12 经常是空密码；用户填了密码时也再试一次空密码。
+        var passwords: [String] = []
+        if !certificatePassword.isEmpty { passwords.append(certificatePassword) }
+        if !passwords.contains("") { passwords.append("") }
+
+        var matchedPassword: String? = nil
+        for candidate in passwords {
+            if LCUtils.getCertTeamId(withKeyData: certificateData, password: candidate) != nil {
+                matchedPassword = candidate
+                break
+            }
+        }
+        guard let matchedPassword else {
+            errorInfo = "lc.settings.invalidCertError".loc
+            errorShow = true
+            return
+        }
+
+        onSideStoreCertificateCallback(certificateData: certificateData, password: certificatePassword)
+
+        UserDefaults.standard.set(LCSharedUtils.appGroupID(), forKey: "LCAppGroupID")
+        successInfo = LCStr("strata.cert.imported", "证书已导入，可在「JIT-Less 诊断」中验证。")
+        successShow = true
+    }
+    
+    func importCertificateFromSideStore() async {
+        if UserDefaults.sideStoreExist() {
+            if let ans = await certificateImportFromBuiltInSideStoreAlert.open(), ans {
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrAccount as String: "signingCertificate",
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne,
+                    kSecAttrService as String: "com.kdt.livecontainer",
+                    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
+                ]
+                
+                var item: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &item)
+                
+                guard status == errSecSuccess else {
+                    if status == errSecItemNotFound {
+                        errorInfo = "lc.settings.importCertFromBuiltinSideStore.certNotFounndErr".loc
+                        errorShow = true
+                    } else {
+                        errorInfo = "Keychain read error: \(status)"
+                        errorShow = true
+                    }
+                    return
+                }
+                
+                guard let data = item as? Data else {
+                    errorInfo = "Failed to decode certificate data".loc
+                    errorShow = true
+                    return
+                }
+                
+                let passwordQuery: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrAccount as String: "signingCertificatePassword",
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne,
+                    kSecAttrService as String: "com.kdt.livecontainer",
+                    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
+                ]
+                
+                var passwordItem: CFTypeRef?
+                let passwordStatus = SecItemCopyMatching(passwordQuery as CFDictionary, &passwordItem)
+                var password = ""
+                if passwordStatus == errSecSuccess,
+                   let passwordData = passwordItem as? Data,
+                   let pwd = String(data: passwordData, encoding: .utf8) {
+                    password = pwd
+                }
+                
+                onSideStoreCertificateCallback(certificateData: data, password: password)
+                
+                return
+            }
+        }
+        
+        let storeScheme : String
+        if store == .AltStore {
+            storeScheme = "altstore-classic"
+        } else {
+            storeScheme = "sidestore"
+        }
+        
+        guard let url = URL(string: "\(storeScheme.lowercased())://certificate?callback_template=livecontainer%3A%2F%2Fcertificate%3Fcert%3D%24%28BASE64_CERT%29%26password%3D%24%28PASSWORD%29") else {
+            errorInfo = "Failed to initialize certificate import URL.".loc
+            errorShow = true
+            return
+        }
+        await UIApplication.shared.open(url)
+    }
+    func onSideStoreCertificateCallback(certificateData: Data, password: String) {
+        do {
+            try LCSharedUtils.strataStoreSigningIdentity(certificateData, password: password)
+            for defaults in [LCUtils.appGroupUserDefault, UserDefaults.standard] {
+                defaults.removeObject(forKey: "LCCertificateData")
+                defaults.removeObject(forKey: "LCCertificatePassword")
+            }
+            LCUtils.appGroupUserDefault.set(NSDate.now, forKey: "LCCertificateUpdateDate")
+            certificateDataFound = true
+        } catch { errorInfo = error.localizedDescription; errorShow = true }
+    }
+    
+    func removeCertificate() async {
+        guard let doRemove = await certificateRemoveAlert.open(), doRemove else {
+            return
+        }
+
+        do { try LCSharedUtils.strataRemoveSigningIdentity() }
+        catch { errorInfo = error.localizedDescription; errorShow = true; return }
+        UserDefaults.standard.removeObject(forKey: "LCCertificateData")
+        UserDefaults.standard.removeObject(forKey: "LCCertificatePassword")
+        LCUtils.appGroupUserDefault.set(nil, forKey: "LCCertificateData")
+        LCUtils.appGroupUserDefault.set(nil, forKey: "LCCertificatePassword")
+        LCUtils.appGroupUserDefault.set(nil, forKey: "LCCertificateUpdateDate")
+        certificateDataFound = false
+
+        UserDefaults.standard.set(nil, forKey: "LCAppGroupID")
+    }
+    
+    func nukeSideStore() async {
+        guard let doRemove = await certificateRemoveAlert.open(), doRemove else {
+            return
+        }
+        do {
+            let fm = FileManager.default
+            let sidestoreAppGroupURL = LCPath.lcGroupDocPath.deletingLastPathComponent()
+            try fm.removeItem(at: sidestoreAppGroupURL.appendingPathComponent("Database"))
+            try fm.removeItem(at: sidestoreAppGroupURL.appendingPathComponent("Apps"))
+        } catch {
+            print("wtf \(error)")
+        }
+    }
+    
+    func exportDyld() {
+        let url = URL(fileURLWithPath: "/usr/lib/dyld")
+        let fileManager = FileManager.default
+        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        do {
+            let destinationURL = documentsURL.appendingPathComponent(url.lastPathComponent)
+            try fileManager.copyItem(at: url, to: destinationURL)
+            print("Successfully copied dyld to Documents.")
+        } catch {
+            print("Error copying dyld \(error)")
+        }
+    }
+    
+    func handleURL(url: URL) {
+        // 从「文件」App 用 Strata 打开证书：直接进导入流程。
+        if url.isFileURL {
+            let ext = url.pathExtension.lowercased()
+            guard ["p12", "pfx", "pkcs12"].contains(ext) else { return }
+            let path = url.path
+            if lastHandledCertificatePath == path { return }
+            lastHandledCertificatePath = path
+            Task { await importCertificateFile(url) }
+            return
+        }
+        guard url.host?.lowercased() == "certificate",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        let queryItems = components.queryItems?.reduce(into: [String: String]()) {
+            $0[$1.name.lowercased()] = $1.value
+        } ?? [:]
+        // 兼容 cert= 与 data=；password 缺省按空密码处理；'+' 可能被 form decode 成空格。
+        guard let raw = queryItems["cert"] ?? queryItems["data"],
+              let encoded = raw.removingPercentEncoding,
+              let certData = Data(base64Encoded: encoded.replacingOccurrences(of: " ", with: "+"))
+        else { return }
+        let password = queryItems["password"] ?? ""
+        onSideStoreCertificateCallback(certificateData: certData, password: password)
+        UserDefaults.standard.set(LCSharedUtils.appGroupID(), forKey: "LCAppGroupID")
+        successInfo = LCStr("strata.cert.imported", "证书已导入，可在「JIT-Less 诊断」中验证。")
+        successShow = true
+    }
+}

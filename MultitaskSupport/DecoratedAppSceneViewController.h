@@ -1,0 +1,29 @@
+#import "FoundationPrivate.h"
+#import "AppSceneViewController.h"
+
+API_AVAILABLE(ios(16.0))
+@interface DecoratedAppSceneViewController : UIViewController<AppSceneViewControllerDelegate>
+@property(nonatomic) AppSceneViewController* appSceneVC;
+@property(nonatomic) UIStackView *view;
+@property(nonatomic) UINavigationBar *navigationBar;
+@property(nonatomic) UINavigationItem *navigationItem;
+@property(nonatomic) UIView *resizeHandle;
+@property(nonatomic) UIView* contentView;
+
+@property(nonatomic) BOOL isMaximized;
+@property(nonatomic) BOOL immersiveRequested;
+@property(nonatomic) BOOL immersivePresented;
+- (void)presentImmersiveFrom:(UIViewController *)presenter;
+@property(nonatomic) CGFloat scaleRatio;
+- (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC;
+- (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC fullScreen:(BOOL)fullScreen;
+- (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC fullScreen:(BOOL)fullScreen jitToken:(NSString*)jitToken;
+- (void)closeWindow;
+- (void)minimizeWindow;
+- (void)dismissImmersiveAnimated:(BOOL)animated completion:(void (^)(void))completion;
+- (void)minimizeWindowPiP;
+- (void)unminimizeWindowPiP;
+- (void)updateVerticalConstraints;
+@property(nonatomic, copy) void (^pidAvailableHandler)(NSNumber *pid, NSError *error);
+@end
+

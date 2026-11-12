@@ -1,0 +1,204 @@
+on: 
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs: 
+      release__nightly:
+        description: Create a nightly release
+        type: boolean
+        required: false
+
+jobs:
+  build:
+    name: Build using xcodebuild command
+    runs-on: macos-latest
+    env:
+      scheme: LiveContainer
+      archive_path: archive
+    outputs:
+      scheme: ${{ steps.scheme.outputs.scheme }}
+      archive_path: ${{ env.archive_path }}
+      artifact: ${{ env.scheme }}.ipa
+      artifact2: ${{ env.scheme }}+SideStore.ipa
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.2'
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Fetch bundled dependencies
+        run: |
+          python3 Scripts/fetch-bundled-dependencies.py
+      - name: Merge Chinese Localization
+        run: |
+          python3 -c "
+          import json
+          from pathlib import Path
+
+          catalog_path = Path('Resources/Localizable.xcstrings')
+          fragment_path = Path('Resources/Strata2-zh-Hans.xcstrings-fragment.json')
+          with catalog_path.open(encoding='utf-8') as f:
+              catalog = json.load(f)
+          with fragment_path.open(encoding='utf-8') as f:
+              fragment = json.load(f)
+
+          if not isinstance(catalog, dict) or not isinstance(catalog.get('strings'), dict):
+              raise ValueError('Localizable.xcstrings must be an Apple string catalog with a strings object')
+          if not isinstance(fragment, dict):
+              raise ValueError('Chinese localization fragment must be a JSON object')
+
+          for key, value in fragment.items():
+              if not isinstance(key, str) or not isinstance(value, str):
+                  raise ValueError(f'Expected string key/value in Chinese fragment: {key!r}')
+              entry = catalog['strings'].setdefault(key, {})
+              if not isinstance(entry, dict):
+                  raise ValueError(f'Invalid catalog entry for {key!r}')
+              localizations = entry.setdefault('localizations', {})
+              if not isinstance(localizations, dict):
+                  raise ValueError(f'Invalid localizations object for {key!r}')
+              localizations['zh-Hans'] = {
+                  'stringUnit': {
+                      'state': 'translated',
+                      'value': value
+                  }
+              }
+
+          # Confirm the generated document remains valid JSON and catalog structure.
+          output = json.dumps(catalog, ensure_ascii=False, indent=2) + '\\n'
+          parsed = json.loads(output)
+          if not isinstance(parsed.get('strings'), dict):
+              raise ValueError('Generated catalog is missing its strings object')
+          for key in fragment:
+              unit = parsed['strings'][key]['localizations']['zh-Hans']['stringUnit']
+              if unit.get('state') != 'translated' or not isinstance(unit.get('value'), str):
+                  raise ValueError(f'Invalid zh-Hans string unit for {key!r}')
+          catalog_path.write_text(output, encoding='utf-8')
+          print(f'Successfully merged {len(fragment)} Chinese localizations into Apple string catalog!')
+          "
+      - name: Set Scheme
+        id: scheme
+        run: |
+          if [ $scheme = default ]
+          then
+            scheme_list=$(xcodebuild -list -json | tr -d "\\n")
+            scheme=$(echo $scheme_list | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
+            echo Using default scheme: $scheme
+          else
+            echo Using configured scheme: $scheme
+          fi
+          echo "scheme=$scheme" >> $GITHUB_OUTPUT
+      - name: Set filetype_parameter
+        id: filetype_parameter
+        run: |
+          filetype_parameter=`ls -A | grep -i \\\\.xcworkspace\\$ && echo workspace || echo project`
+          echo "filetype_parameter=$filetype_parameter" >> $GITHUB_OUTPUT
+      - name: Set file_to_build
+        id: file_to_build
+        run: |
+          file_to_build=`ls -A | grep -i \\\\.xcworkspace\\$ || ls -A | grep -i \\\\.xcodeproj\\$`
+          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
+          echo "file_to_build=$file_to_build" >> $GITHUB_OUTPUT
+      - name: Archive
+        env:
+          scheme: ${{ steps.scheme.outputs.scheme }}
+          filetype_parameter: ${{ steps.filetype_parameter.outputs.filetype_parameter }}
+          file_to_build: ${{ steps.file_to_build.outputs.file_to_build }}
+        run: |
+          set -o pipefail
+          xcodebuild archive -archivePath "$archive_path" -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -sdk iphoneos -arch arm64 -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee xcodebuild.log
+      - name: Print failure errors
+        if: failure()
+        run: |
+          echo "=== ARCHIVE ERRORS ==="
+          grep -C 3 -i "error:" xcodebuild.log || tail -n 100 xcodebuild.log
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+      - name: Tar Build Artifact
+        run: tar -cvf "$archive_path.xcarchive.tar" "$archive_path.xcarchive"
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.archive_path }}.xcarchive.tar
+          path: ${{ env.archive_path }}.xcarchive.tar
+      - name: Create IPA
+        run: |
+          sh .github/build_github.sh
+
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.scheme }}.ipa
+          path: ${{ env.scheme }}.ipa
+      
+      - name: Upload LiveContainer+SideStore
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.scheme }}+SideStore.ipa
+          path: ${{ env.scheme }}+SideStore.ipa
+
+  release__nightly:
+    name: Nightly Release
+    permissions:
+      contents: write
+    if: inputs.release__nightly || github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    needs: [build]
+    concurrency:
+      group: release__nightly
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Download a Build Artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+      - name: Download a Build Artifact2
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact2 }}
+      - name: Get Commit Info
+        id: commit_info
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
+          echo "COMMIT_MSG=$COMMIT_MSG" >> $GITHUB_ENV
+      - name: Update AltStore source
+        id: update_source
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_LINK: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+          commit_sha: ${{ env.COMMIT_SHA }}
+          commit_msg: ${{ env.COMMIT_MSG }}
+        run: |
+          python .github/update_json.py
+      - name: Nightly Release
+        uses: andelf/nightly-release@5834076edc55cc05975561c9722043f072ac5c26
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          body: |
+            **Commit:** [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            **Message:** ${{ github.event.head_commit.message }}
+            
+            This is a nightly release [created automatically with GitHub Actions workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}).
+          files: |
+            ${{ needs.build.outputs.artifact }}
+            ${{ needs.build.outputs.artifact2 }}
+            .github/apps_nightly.json
+      - name: Update apps.json in Release 1.0
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: "1.0"
+          files: |
+            .github/apps_ss_lc.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
