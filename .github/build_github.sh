@@ -5,6 +5,28 @@ brew install ldid
 
 # move lc to working folder
 mv "$archive_path.xcarchive/Products/Applications" Payload
+# ad-hoc sign the main executable with LiveContainer's real entitlements.
+# SideStore reads the target bundle's entitlements to decide which App Group to
+# register and assign; an unsigned payload makes it skip that step, the profile
+# then ships without com.apple.security.application-groups and the built-in store
+# dies on launch with "App Group Container Inaccessible".
+if [ -f .github/sidelc/LiveContainer_adhoc.xml ]; then
+  ldid -S.github/sidelc/LiveContainer_adhoc.xml Payload/LiveContainer.app/LiveContainer
+  for appex in Payload/LiveContainer.app/PlugIns/*.appex; do
+    appex_name=$(basename "$appex" .appex)
+    [ -f "$appex/$appex_name" ] && ldid -S"" "$appex/$appex_name"
+  done
+  for fw in Payload/LiveContainer.app/Frameworks/*.framework; do
+    fw_name=$(basename "$fw" .framework)
+    [ -f "$fw/$fw_name" ] && ldid -S"" "$fw/$fw_name"
+    for dylib in "$fw"/*.dylib; do
+      [ -f "$dylib" ] && ldid -S"" "$dylib"
+    done
+  done
+  for dylib in Payload/LiveContainer.app/Frameworks/*.dylib; do
+    [ -f "$dylib" ] && ldid -S"" "$dylib"
+  done
+fi
 
 # 扩展（.appex）与 SideStoreSupport.framework 都是独立 bundle：进程里 Bundle.main 指向它们自己，
 # 而这些 bundle 里没有任何 .lproj，于是扩展界面只能显示 key 原文（String.loc 的 en 兜底还会踩空）。
