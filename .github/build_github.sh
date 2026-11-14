@@ -5,26 +5,53 @@ brew install ldid
 
 # move lc to working folder
 mv "$archive_path.xcarchive/Products/Applications" Payload
-# ad-hoc sign the main executable with LiveContainer's real entitlements.
-# SideStore reads the target bundle's entitlements to decide which App Group to
-# register and assign; an unsigned payload makes it skip that step, the profile
-# then ships without com.apple.security.application-groups and the built-in store
-# dies on launch with "App Group Container Inaccessible".
-if [ -f .github/sidelc/LiveContainer_adhoc.xml ]; then
-  ldid -S.github/sidelc/LiveContainer_adhoc.xml Payload/LiveContainer.app/LiveContainer
+
+# --- App Group entitlements -------------------------------------------------
+# SideStore decides which App Group to register/assign by reading the target
+# bundle's entitlements. A payload that declares no
+# com.apple.security.application-groups makes it silently skip that step, the
+# profile then carries no group, and anything that needs the shared container
+# (the built-in store's Core Data database) fails on launch with
+# "App Group Container Inaccessible". Upstream releases sign the payload here;
+# reproduce that so SideStore can hand us a profile holding the group.
+ADHOC_APP_ENTITLEMENTS=.github/sidelc/LiveContainer_adhoc.xml
+
+write_appex_entitlements() {
+  bundle_id="$1"
+  out="$2"
+  cat > "$out" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>AAAAA11111.${bundle_id}</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>AAAAA11111</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.SideStore.SideStore</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+}
+
+if [ -f "$ADHOC_APP_ENTITLEMENTS" ]; then
+  ldid -S"$ADHOC_APP_ENTITLEMENTS" Payload/LiveContainer.app/LiveContainer
+
+  # Every embedded extension runs in its own process, so each one needs the
+  # group declared on its own executable for the store to assign one to it.
   for appex in Payload/LiveContainer.app/PlugIns/*.appex; do
     appex_name=$(basename "$appex" .appex)
-    [ -f "$appex/$appex_name" ] && ldid -S"" "$appex/$appex_name"
-  done
-  for fw in Payload/LiveContainer.app/Frameworks/*.framework; do
-    fw_name=$(basename "$fw" .framework)
-    [ -f "$fw/$fw_name" ] && ldid -S"" "$fw/$fw_name"
-    for dylib in "$fw"/*.dylib; do
-      [ -f "$dylib" ] && ldid -S"" "$dylib"
-    done
-  done
-  for dylib in Payload/LiveContainer.app/Frameworks/*.dylib; do
-    [ -f "$dylib" ] && ldid -S"" "$dylib"
+    exe="$appex/$appex_name"
+    [ -f "$exe" ] || continue
+    bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist" 2>/dev/null || true)
+    [ -n "$bundle_id" ] || bundle_id="com.kdt.livecontainer.$appex_name"
+    write_appex_entitlements "$bundle_id" "/tmp/ent_$appex_name.plist"
+    ldid -S"/tmp/ent_$appex_name.plist" "$exe"
   done
 fi
 
