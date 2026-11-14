@@ -1142,10 +1142,12 @@ private struct LiveBoardHomeIcon: View {
 
     private var ring: some View {
         let line = max(2, size * 0.052)
+        let clamped = min(1, max(0.02, app.signProgress))
+        let fraction = CGFloat(clamped)
         return ZStack {
             Circle().stroke(Color.white.opacity(0.28), lineWidth: line)
             Circle()
-                .trim(from: 0, to: max(0.02, min(1, CGFloat(app.signProgress))))
+                .trim(from: 0, to: fraction)
                 .stroke(Color.white, style: StrokeStyle(lineWidth: line, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: app.signProgress)

@@ -10,9 +10,11 @@ import CoreImage
     /// 更新安装会复用同一个 bundle 路径，只按路径做 key 会命中换包前的旧图标，
     /// 于是「更新完图标没变」。把安装时间也算进 key，新包自然换一张新图。
     private static func cacheKey(_ app: LCAppModel, dark: Bool) -> NSString {
-        let stamp = app.appInfo.installationDate?.timeIntervalSince1970 ?? 0
-        return (app.appInfo.bundlePath() + (dark ? ":dark" : ":light") + ":"
-                + String(LiveBoardAppCustomization.shared.revision) + ":" + String(Int(stamp))) as NSString
+        let stamp = Int(app.appInfo.installationDate?.timeIntervalSince1970 ?? 0)
+        let path = app.appInfo.bundlePath()
+        let appearance = dark ? ":dark" : ":light"
+        let revision = LiveBoardAppCustomization.shared.revision
+        return "\(path)\(appearance):\(revision):\(stamp)" as NSString
     }
     static func image(_ app: LCAppModel, dark: Bool) -> UIImage? {
         if let custom = LiveBoardAppCustomization.shared.image(app) { return custom }
