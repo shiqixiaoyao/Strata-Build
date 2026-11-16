@@ -771,6 +771,7 @@ static void exceptionHandler(NSException *exception) {
 // from suspending it, so a short trip to another app no longer loses game progress. Opt-in (battery cost);
 // iOS can still terminate it under memory pressure. The guest's own audio session settings are restored.
 static AVAudioPlayer *strataKeepAlivePlayer;
+static id strataInterruptionObserver;
 static AVAudioSessionCategory strataSavedCategory;
 static AVAudioSessionMode strataSavedMode;
 static AVAudioSessionCategoryOptions strataSavedOptions;
@@ -794,9 +795,27 @@ static void StrataKeepAliveStart(void) {
     }
     strataKeepAlivePlayer = [[AVAudioPlayer alloc] initWithData:StrataSilentWAV() error:&error];
     strataKeepAlivePlayer.numberOfLoops = -1; strataKeepAlivePlayer.volume = 0;
-    if (![strataKeepAlivePlayer play]) { NSLog(@"[Strata] keep-alive player failed: %@", error); strataKeepAlivePlayer = nil; }
+    if (![strataKeepAlivePlayer play]) { NSLog(@"[Strata] keep-alive player failed: %@", error); strataKeepAlivePlayer = nil; return; }
+    // 用户回音乐 App 按播放、来电结束、系统重新仲裁时，这个会话会被收走，静音流跟着停，
+    // 看起来还在保活其实早就没了。中断结束时重新激活并续上。
+    if (!strataInterruptionObserver) {
+        strataInterruptionObserver = [NSNotificationCenter.defaultCenter addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if ([note.userInfo[AVAudioSessionInterruptionTypeKey] integerValue] != AVAudioSessionInterruptionTypeEnded) return;
+            if (!strataKeepAlivePlayer) return;
+            NSError *resumeError = nil;
+            if (![AVAudioSession.sharedInstance setActive:YES error:&resumeError]) {
+                NSLog(@"[Strata] keep-alive resume failed: %@", resumeError);
+                return;
+            }
+            if (!strataKeepAlivePlayer.isPlaying) [strataKeepAlivePlayer play];
+        }];
+    }
 }
 static void StrataKeepAliveStop(void) {
+    if (strataInterruptionObserver) {
+        [NSNotificationCenter.defaultCenter removeObserver:strataInterruptionObserver];
+        strataInterruptionObserver = nil;
+    }
     if (!strataKeepAlivePlayer) return;
     [strataKeepAlivePlayer stop]; strataKeepAlivePlayer = nil;
     if (strataSavedCategory) [AVAudioSession.sharedInstance setCategory:strataSavedCategory mode:(strataSavedMode ?: AVAudioSessionModeDefault) options:strataSavedOptions error:nil];
@@ -995,16 +1014,29 @@ int LiveContainerMain(int argc, char *argv[]) {
         // iOS often terminates a backgrounded game to reclaim memory; the next cold start would then show the
         // launcher. Remember the guest only while it is in the background so the launcher can reopen it.
         [lcUserDefaults removeObjectForKey:@"StrataResumeGuest"];
-        if (!isLiveProcess && selectedApp && !isSideStore) {
+        // 无缝切换（默认开）时 guest 跑在 LiveProcess.appex 里，扩展的后台寿命比主进程短得多，
+        // 而这里原来排除了 isLiveProcess —— 等于扩展模式下完全没有保活。该扩展的 Info.plist
+        // 本来就声明了 UIBackgroundModes: audio，所以一并放开；商店自己有保活，继续跳过。
+        if (selectedApp && !isSideStore) {
             NSString *resumeKey = controlsKey;
-            [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            void (^rememberGuest)(NSNotification *) = ^(NSNotification *note) {
                 [lcUserDefaults setObject:@{@"key": resumeKey, @"time": @(NSDate.date.timeIntervalSince1970)} forKey:@"StrataResumeGuest"];
                 StrataKeepAliveStart();
-            }];
-            [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            };
+            void (^forgetGuest)(NSNotification *) = ^(NSNotification *note) {
                 [lcUserDefaults removeObjectForKey:@"StrataResumeGuest"];
                 StrataKeepAliveStop();
-            }];
+            };
+            // 主进程走 UIKit 的前后台通知；跑在 LiveProcess.appex 里时 UIKit 那套不一定投递，
+            // 补一份扩展宿主自己的通知，两边谁先到都行（StrataKeepAliveStart 有重入保护）。
+            NSArray<NSString *> *backgroundNames = @[UIApplicationDidEnterBackgroundNotification, @"NSExtensionHostDidEnterBackgroundNotification"];
+            NSArray<NSString *> *foregroundNames = @[UIApplicationWillEnterForegroundNotification, @"NSExtensionHostWillEnterForegroundNotification"];
+            for (NSString *name in backgroundNames) {
+                [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:rememberGuest];
+            }
+            for (NSString *name in foregroundNames) {
+                [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:forgetGuest];
+            }
         }
         NSString *appError = invokeAppMain(selectedApp, selectedContainer, argc, argv);
         if (appError) {

@@ -32,7 +32,12 @@ class StrataPhoneAppInfo: LCAppInfo {
     static func launchURL(_ entry: StrataPhoneAppEntry) -> URL? { StrataPhoneAppPolicy.launchURL(entry) }
 
     // MARK: Icons and app links from the paired-Mac export
-    nonisolated(unsafe) private static let iconCache = NSCache<NSString, UIImage>()  // NSCache is thread-safe
+    nonisolated(unsafe) private static let iconCache: NSCache<NSString, UIImage> = {  // NSCache is thread-safe
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 240
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
     private static var catalogCache: (date: Date, schemes: [String: [String]])?
     nonisolated static var iconDirectory: URL { LCPath.docPath.appendingPathComponent("Strata3/PhoneAppIcons", isDirectory: true) }
     private static var catalogURL: URL { LCPath.docPath.appendingPathComponent("Strata3/PhoneAppsCatalog.json") }
@@ -47,7 +52,7 @@ class StrataPhoneAppInfo: LCAppInfo {
             if image == nil { image = LCUtils.strataPhoneApplicationIcon(id) }
         }
         let result = image ?? letterTile(name.isEmpty ? (bundleIdentifier ?? "?") : name)
-        iconCache.setObject(result, forKey: key)
+        iconCache.setObject(result, forKey: key, cost: result.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
         return result
     }
     static func invalidateIcons() { iconCache.removeAllObjects(); catalogCache = nil }
