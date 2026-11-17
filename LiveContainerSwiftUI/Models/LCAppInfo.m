@@ -286,9 +286,6 @@
     };
 }
 
-- (BOOL)gameModeSupportDeclared {
-    return [_infoPlist[@"LSSupportsGameMode"] boolValue] && [_infoPlist[@"GCSupportsGameMode"] boolValue];
-}
 - (BOOL)enableGameModeSupportWithError:(NSError **)error {
     NSMutableDictionary *updated = _infoPlist.mutableCopy;
     updated[@"LSSupportsGameMode"] = @YES;
@@ -659,15 +656,6 @@
 
 - (void)setFixLocalNotification:(bool)fixLocalNotification {
     _info[@"fixLocalNotification"] = @(fixLocalNotification);
-    [self save];
-}
-
-- (bool)fixBackgroundTaskIdentifiers {
-    return [_info[@"fixBackgroundTaskIdentifiers"] boolValue];
-}
-
-- (void)setFixBackgroundTaskIdentifiers:(bool)fixBackgroundTaskIdentifiers {
-    _info[@"fixBackgroundTaskIdentifiers"] = @(fixBackgroundTaskIdentifiers);
     [self save];
 }
 

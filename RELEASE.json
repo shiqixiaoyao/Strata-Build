@@ -1,11 +1,9 @@
 {
-  "version": "4.0.6",
-  "tag": "v4.0.6",
-  "developmentRevision": 63,
-  "liveContainerBase": "nightly 9d6ea09",
-  "sourceBase": "285f338b7713ce1f4c67addea9c60bf0121121c2",
-  "previousRelease": "v3.0.0",
-  "ipaSha256": "fa12970cc93953e96adccdc415399417d17253e8530afa2654a8052c47b0ed46",
-  "bundleVersionRetainedForCompatibility": true,
-  "ipaSize": 38740367
+  "version": "2.0.1",
+  "tag": "v2.0.1",
+  "developmentRevision": 26,
+  "liveContainerBase": "3.8.11",
+  "sourceBase": "bdc07ed9d0fce19f79db78a4a1015d67d4312597",
+  "ipaSha256": "",
+  "bundleVersionRetainedForCompatibility": true
 }

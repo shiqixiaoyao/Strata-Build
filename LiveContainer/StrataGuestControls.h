@@ -4,5 +4,3 @@ void StrataStartGuestControlsWithIdentity(NSString *group, NSString *appName, BO
 
 @class UIWindow;
 void StrataToggleHostControls(UIWindow *window);
-@class UIView;
-void StrataSetSwitcherProviders(UIView *(^live)(NSString *key), NSString *(^front)(void));

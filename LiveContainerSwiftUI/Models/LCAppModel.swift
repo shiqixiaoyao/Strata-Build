@@ -68,11 +68,6 @@ class LCAppModel: ObservableObject, Hashable {
             appInfo.fixLocalNotification = uiFixLocalNotification
         }
     }
-    @Published var uiFixBackgroundTaskIdentifiers : Bool {
-        didSet {
-            appInfo.fixBackgroundTaskIdentifiers = uiFixBackgroundTaskIdentifiers
-        }
-    }
     
     @Published var uiHideLiveContainer : Bool {
         didSet {
@@ -194,7 +189,6 @@ class LCAppModel: ObservableObject, Hashable {
         self.uiUseLCBundleId = appInfo.doUseLCBundleId
         self.uiFixFilePickerNew = appInfo.fixFilePickerNew
         self.uiFixLocalNotification = appInfo.fixLocalNotification
-        self.uiFixBackgroundTaskIdentifiers = appInfo.fixBackgroundTaskIdentifiers
         self.uiHideLiveContainer = appInfo.hideLiveContainer
         self.uiDontInjectTweakLoader = appInfo.dontInjectTweakLoader
         self.uiTweakLoaderInjectFailed = appInfo.info()["LCTweakLoaderCantInject"] as? Bool ?? false
@@ -224,10 +218,6 @@ class LCAppModel: ObservableObject, Hashable {
     
     // You should let LCAppModel.runApp to decide whether to run in multitask mode, but you may override the multitask parameter if necessary
     func runApp(multitask: Bool? = nil, containerFolderName : String? = nil, bundleIdOverride : String? = nil, urlStr : String? = nil, forceJIT: Bool? = nil) async throws{
-        if let shortcut = appInfo as? StrataPhoneAppInfo {
-            try await StrataPhoneApps.shared.open(shortcut.entryID)
-            return
-        }
         let acquired = await MainActor.run { () -> Bool in
             guard !self.isAppRunning else { return false }
             self.isAppRunning = true
@@ -258,23 +248,13 @@ class LCAppModel: ObservableObject, Hashable {
         
         let classicMode = appInfo.defaultClassicMode
         let builtInJIT = LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue && (forceJIT ?? (appInfo.isJITNeeded || appInfo.is32bit))
-        let hostOptions = (LCUtils.appGroupUserDefault.string(forKey: "StrataHostJITApps") ?? "{}").data(using: .utf8).flatMap { try? JSONDecoder().decode([String: Bool].self, from: $0) } ?? [:]
-        let hostKey = "\(uiIsShared ? "shared" : "local"):\(appInfo.relativeBundlePath ?? bundleIdentifier)"
-        let hostJIT = builtInJIT && hostOptions[hostKey] == true && multitask != true && classicMode == 0
         if builtInJIT && classicMode != 0 {
             throw "Built-in JIT requires normal compatibility mode. Turn off Classic Mode for this app, then retry.".loc
         }
-        let preferredMultitask = hostJIT ? false : (classicMode == 0 ? (multitask ?? (builtInJIT ? false : shouldLaunchInMultitaskMode)) : false)
+        let preferredMultitask = classicMode == 0 ? (multitask ?? (builtInJIT ? false : shouldLaunchInMultitaskMode)) : false
         // Keep the JIT target alive in a full-screen guest when normal presentation is requested.
-        let fullScreenJIT = builtInJIT && !hostJIT && !preferredMultitask
-        // Seamless switching: run each app in its own process, full screen, so switching brings its
-        // window to the front instead of relaunching Strata. Explicit in-process requests (HostJIT,
-        // Classic Mode, Request Game Mode = multitask false) keep the old path.
-        let seamless = (LCUtils.appGroupUserDefault.object(forKey: "StrataSeamlessSwitching") as? Bool ?? true)
-            && !hostJIT && classicMode == 0 && multitask == nil && !preferredMultitask
-            // The built-in SideStore lives inside Strata and can't run in a LiveProcess.
-            && bundleIdOverride == nil && !(appInfo is BuiltInSideStoreAppInfo)
-        let multitask = preferredMultitask || fullScreenJIT || seamless
+        let fullScreenJIT = builtInJIT && !preferredMultitask
+        let multitask = preferredMultitask || fullScreenJIT
         
         if MultitaskManager.isMultitasking() || multitask,
            let currentDataFolder {
@@ -372,16 +352,10 @@ class LCAppModel: ObservableObject, Hashable {
 #if targetEnvironment(simulator)
         jitNeeded = false
 #endif
-        if jitNeeded && hostJIT {
-            guard let relative = appInfo.relativeBundlePath, let folder = uiSelectedContainer?.folderName else { throw "HostJIT needs a registered guest and data container.".loc }
-            let hostPairingURL = await LiveBoardBuiltInJIT.pairingURL
-            guard FileManager.default.fileExists(atPath: hostPairingURL.path) else { throw "Import a pairing file and prepare the device before testing HostJIT.".loc }
-            UserDefaults.standard.set(["app": relative, "container": folder, "created": Date().timeIntervalSince1970, "script": resolvedJITScript ?? LCUtils.base64EncodedUniversalJITScript()], forKey: "StrataHostJITRequest")
-            LCSharedUtils.launchToGuestApp(withClassicMode: classicMode)
-        } else if jitNeeded {
+        if jitNeeded {
             if multitask, #available(iOS 17.4, *) {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    LCUtils.launchMultitaskGuestApp(appInfo.displayName(), fullScreen: fullScreenJIT || seamless, waitForJIT: builtInJIT) { pidNumber, error in
+                    LCUtils.launchMultitaskGuestApp(appInfo.displayName(), fullScreen: fullScreenJIT, waitForJIT: builtInJIT) { pidNumber, error in
                         if let error {
                             continuation.resume(throwing: error)
                             return
@@ -599,7 +573,7 @@ class LCAppModel: ObservableObject, Hashable {
         toAppInfo.doUseLCBundleId = fromApp.appInfo.doUseLCBundleId
         toAppInfo.fixFilePickerNew = fromApp.appInfo.fixFilePickerNew
         toAppInfo.fixLocalNotification = fromApp.appInfo.fixLocalNotification
-        toAppInfo.fixBackgroundTaskIdentifiers = fromApp.appInfo.fixBackgroundTaskIdentifiers
+        // Strata v7 has no LCAppInfo.fixBackgroundTaskIdentifiers (added upstream after the fork).
         
         toAppInfo.isJITNeeded = fromApp.appInfo.isJITNeeded
         toAppInfo.jitLaunchScriptJs = fromApp.appInfo.jitLaunchScriptJs

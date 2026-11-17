@@ -69,7 +69,7 @@ struct LaunchAppExtension: AppIntent {
                 LaunchAppExtension.ext = ext
             } catch {
                 NSLog("Failed to start extension \(error)")
-                throw LaunchAppExtensionError(String(format: "Failed to start extension %@. To use the Launch App shortcut, reinstall LiveContainer with LaunchAppExtension and ShareExtension installed. If you use SideStore, choose \"Keep App Extensions (Use Main Profile)\". If you use Impactor, choose \"Only Register Main Bundle\". For other sideloaders, select keep all extensions, i.e. DO NOT Remove any extension.".loc, "\(error)"))
+                throw LaunchAppExtensionError("Failed to start extension \(error). To use the Launch App shortcut, reinstall LiveContainer with LaunchAppExtension and ShareExtension installed. If you use SideStore, choose \"Keep App Extensions (Use Main Profile)\". If you use Impactor, choose \"Only Register Main Bundle\". For other sideloaders, select keep all extensions, i.e. DO NOT Remove any extension.")
             }
             
         }
@@ -89,14 +89,14 @@ struct LaunchAppExtension: AppIntent {
         }
         
         if !isLiveContainerURL && normalizedLaunchScheme != "sidestore" {
-            throw LaunchAppExtensionError("Not a livecontainer URL!".loc)
+            throw LaunchAppExtensionError("Not a livecontainer URL!")
         }
         
         guard
             let appGroupId = LCSharedUtils.appGroupID(),
             let lcSharedDefaults = UserDefaults(suiteName: appGroupId)
         else {
-            throw LaunchAppExtensionError("lcSharedDefaults failed to initialize, because no app group was found. Did you sign LiveContainer correctly?".loc)
+            throw LaunchAppExtensionError("lcSharedDefaults failed to initialize, because no app group was found. Did you sign LiveContainer correctly?")
         }
         
         if normalizedLaunchScheme == "sidestore" {
@@ -108,14 +108,14 @@ struct LaunchAppExtension: AppIntent {
         }
         
         if launchURL.host != "livecontainer-launch" {
-            throw LaunchAppExtensionError("Not a livecontainer launch URL!".loc)
+            throw LaunchAppExtensionError("Not a livecontainer launch URL!")
         }
 
         var bundleId: String? = nil
         var containerName: String? = nil
         var forceJIT: Bool = false
         guard var components = URLComponents(url: launchURL, resolvingAgainstBaseURL: false) else {
-            throw LaunchAppExtensionError("URLComponents failed to initialize.".loc)
+            throw LaunchAppExtensionError("URLComponents failed to initialize.")
         }
         
         for queryItem in components.queryItems ?? [] {
@@ -132,7 +132,7 @@ struct LaunchAppExtension: AppIntent {
             }
         }
         guard let bundleId else {
-            throw LaunchAppExtensionError("No bundle-name parameter found.".loc)
+            throw LaunchAppExtensionError("No bundle-name parameter found.")
         }
                 
         // resolve private Documents bookmark
@@ -167,12 +167,12 @@ struct LaunchAppExtension: AppIntent {
         // check if the app is locked/hidden/require JIT, if so we don't directly set keys in lcSharedDefaults
         let appInfoURL = appBundle.url(forResource: "LCAppInfo", withExtension: "plist")
         guard let appInfoURL else {
-            throw LaunchAppExtensionError("Failed to find AppInfo!".loc)
+            throw LaunchAppExtensionError("Failed to find AppInfo!")
         }
 
         let appInfo = try PropertyListSerialization.propertyList(from: try Data(contentsOf: appInfoURL), format: nil)
         guard let appInfo = appInfo as? [String:Any] else {
-            throw LaunchAppExtensionError("Failed to load AppInfo!".loc)
+            throw LaunchAppExtensionError("Failed to load AppInfo!")
         }
         let isHiden = appInfo["isHidden"] as? Bool ?? false
         let isLocked = appInfo["isLocked"] as? Bool ?? false
@@ -220,7 +220,7 @@ struct LaunchAppExtension: AppIntent {
 
         components.scheme = schemeToLaunch
         guard let newURL = components.url else {
-            throw LaunchAppExtensionError("unable to construct new url".loc)
+            throw LaunchAppExtensionError("unable to construct new url")
         }
 
         var launchOptions: [String: Any] = ["url": newURL]

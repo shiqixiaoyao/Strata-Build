@@ -87,19 +87,7 @@ struct LCSettingsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Strata") {
-                    StrataCreditsButton(location: "settings.about")
-                    NavigationLink("App Extensions") { StrataExtensionsView(apps: sharedModel.apps) }
-                    NavigationLink("iPhone Apps") { StrataPhoneAppsView() }
-                    NavigationLink("Refresh") { StrataAutoRefreshSettings() }
-                    if #available(iOS 16.0, *) {
-                    NavigationLink(LCStr("Runtime Manager · Strata %@", "Runtime Manager · Strata %@", StrataVersion.display)) { StrataRuntimeCenter(apps: sharedModel.apps + sharedModel.hiddenApps, launch: { app in Task { do {
-                        if app.uiIsLocked && !sharedModel.isHiddenAppUnlocked { guard try await LCUtils.authenticateUser() else { return } }
-                        try await app.runApp()
-                    } catch { errorInfo = error.localizedDescription; errorShow = true } } }, manage: { _ in sharedModel.selectedTab = .apps }) }
-                    NavigationLink("LocalSigner · Signing Identity") { StrataIdentitySettings() }
-                    }
-                }
+                Section("Strata") { StrataCreditsButton(location: "settings.about") }
                 if sharedModel.multiLCStatus != 2 {
                     Section{
                         if !certificateDataFound {
@@ -208,8 +196,7 @@ struct LCSettingsView: View {
                     Text("lc.settings.JitDesc".loc)
                 }
                 
-                Section { NavigationLink("Automatic refresh") { StrataAutoRefreshSettings() }
-                    NavigationLink("Memory and signing permissions") { StrataMemorySettings() } }
+                Section { NavigationLink("Memory and signing permissions") { StrataMemorySettings() } }
                 Section {
                     Picker(selection: $selected32BitEmulator) {
                         ForEach(sharedModel.arm32EmuApps, id: \.self) { app in
@@ -321,6 +308,11 @@ struct LCSettingsView: View {
                             Text("lc.settings.storageManagement".loc)
                         }
                     }
+                    NavigationLink {
+                        LCDataManagementView()
+                    } label: {
+                        Text("lc.settings.dataManagement".loc)
+                    }
                 }
                 
                 Section {
@@ -424,7 +416,7 @@ struct LCSettingsView: View {
             }
             .alert("lc.common.success".loc, isPresented: $successShow){
             } message: {
-                Text(successInfo.loc)
+                Text(successInfo)
             }
             .alert("lc.settings.importCertificate".loc, isPresented: $certificateImportAlert.show) {
                 Button {
@@ -666,8 +658,7 @@ struct LCSettingsView: View {
             return
         }
 
-        onSideStoreCertificateCallback(certificateData: certificateData, password: certificatePassword)
-
+        onSideStoreCertificateCallback(certificateData: certificateData, password: matchedPassword)
         UserDefaults.standard.set(LCSharedUtils.appGroupID(), forKey: "LCAppGroupID")
         successInfo = LCStr("strata.cert.imported", "证书已导入，可在「JIT-Less 诊断」中验证。")
         successShow = true
@@ -744,15 +735,10 @@ struct LCSettingsView: View {
         await UIApplication.shared.open(url)
     }
     func onSideStoreCertificateCallback(certificateData: Data, password: String) {
-        do {
-            try LCSharedUtils.strataStoreSigningIdentity(certificateData, password: password)
-            for defaults in [LCUtils.appGroupUserDefault, UserDefaults.standard] {
-                defaults.removeObject(forKey: "LCCertificateData")
-                defaults.removeObject(forKey: "LCCertificatePassword")
-            }
-            LCUtils.appGroupUserDefault.set(NSDate.now, forKey: "LCCertificateUpdateDate")
-            certificateDataFound = true
-        } catch { errorInfo = error.localizedDescription; errorShow = true }
+        LCUtils.appGroupUserDefault.set(certificateData, forKey: "LCCertificateData")
+        LCUtils.appGroupUserDefault.set(password, forKey: "LCCertificatePassword")
+        LCUtils.appGroupUserDefault.set(NSDate.now, forKey: "LCCertificateUpdateDate")
+        certificateDataFound = true
     }
     
     func removeCertificate() async {
@@ -760,10 +746,6 @@ struct LCSettingsView: View {
             return
         }
 
-        do { try LCSharedUtils.strataRemoveSigningIdentity() }
-        catch { errorInfo = error.localizedDescription; errorShow = true; return }
-        UserDefaults.standard.removeObject(forKey: "LCCertificateData")
-        UserDefaults.standard.removeObject(forKey: "LCCertificatePassword")
         LCUtils.appGroupUserDefault.set(nil, forKey: "LCCertificateData")
         LCUtils.appGroupUserDefault.set(nil, forKey: "LCCertificatePassword")
         LCUtils.appGroupUserDefault.set(nil, forKey: "LCCertificateUpdateDate")

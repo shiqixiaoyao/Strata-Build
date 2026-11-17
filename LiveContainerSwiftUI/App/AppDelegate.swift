@@ -13,10 +13,7 @@ import Intents
         if LCUtils.appGroupUserDefault.object(forKey: "LCJITEnablerType") == nil {
             LCUtils.appGroupUserDefault.set(JITEnablerType.BuiltIn.rawValue, forKey: "LCJITEnablerType")
         }
-        StrataAutoRefresh.shared.register()
-        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in StrataAutoRefresh.shared.checkDue() }
-        }
+        _ = LiveBoardArtworkStore() // Create visible folders and migrate imports even when starting in iOS Home.
         application.shortcutItems = nil
         UserDefaults.standard.removeObject(forKey: "LCNeedToAcquireJIT")
         

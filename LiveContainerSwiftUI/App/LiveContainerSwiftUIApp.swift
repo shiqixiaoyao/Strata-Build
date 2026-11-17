@@ -10,11 +10,7 @@ import SwiftUI
 struct LiveContainerSwiftUIApp : SwiftUI.App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
-    @MainActor private static var libraryLoadStarted = false
-    @MainActor static func loadLibrary() async {
-        guard !libraryLoadStarted else { return }
-        libraryLoadStarted = true
-        await Task.yield()
+    init() {
         let fm = FileManager()
         var tempAppDataFolderNames : [String] = []
         var tempTweakFolderNames : [String] = []
@@ -32,7 +28,6 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
                 if !appDir.hasSuffix(".app") {
                     continue
                 }
-                await Task.yield()
                 let newApp = LCAppInfo(bundlePath: "\(LCPath.bundlePath.path)/\(appDir)")!
                 newApp.relativeBundlePath = appDir
                 newApp.isShared = false
@@ -54,7 +49,6 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
                     if !appDir.hasSuffix(".app") {
                         continue
                     }
-                    await Task.yield()
                     let newApp = LCAppInfo(bundlePath: "\(LCPath.lcGroupBundlePath.path)/\(appDir)")!
                     newApp.relativeBundlePath = appDir
                     newApp.isShared = true
@@ -104,13 +98,11 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
         if let tempURLSchemes {
             UserDefaults.lcShared().set(Array(tempURLSchemes), forKey: "LCGuestURLSchemes")
         }
-        DataManager.shared.model.registryLoading = false
     }
     
     var body: some Scene {
         WindowGroup(id: "Main") {
-            StrataLibraryLoadingView()
-                .task { await Self.loadLibrary() }
+            LCTabView()
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .environmentObject(DataManager.shared.model)
                 .environmentObject(LCAppSortManager.shared)
@@ -126,18 +118,4 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
         }
     }
     
-}
-
-private struct StrataLibraryLoadingView: View {
-    @ObservedObject private var model = DataManager.shared.model
-    var body: some View {
-        Group {
-            // Readiness barrier stays: the launcher must not reconcile saved layouts against an empty registry.
-            // Only the visible spinner/text is gone; a plain dark placeholder covers the short load.
-            if model.registryLoading {
-                Color.black.ignoresSafeArea()
-                    .accessibilityElement().accessibilityLabel("Opening your library")
-            } else { LCTabView() }
-        }
-    }
 }

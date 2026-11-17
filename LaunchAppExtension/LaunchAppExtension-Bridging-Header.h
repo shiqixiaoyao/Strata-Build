@@ -8,5 +8,4 @@
 #import "../LiveContainer/LCSharedUtils.h"
 #import "../LiveContainer/FoundationPrivate.h"
 #import "../LiveContainer/UIKitPrivate.h"
-#import "../LiveContainer/Localization.h"
 bool lsApplicationWorkspaceCanOpenURL(NSURL* url);

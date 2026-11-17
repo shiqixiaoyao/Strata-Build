@@ -34,56 +34,26 @@ struct LCStorageBreakdown {
 
 @MainActor
 final class LCStorageManagementModel: ObservableObject {
-    @Published var lastCalculated: Date?
-    private static var cached: (key: String, value: LCStorageBreakdown, date: Date, skipped: Int)?
-    private static let scans = StrataStorageScanCoordinator<(LCStorageBreakdown, Int)>()
-    @Published private(set) var skippedEntries = 0
     @Published var breakdown: LCStorageBreakdown?
     @Published var isCalculating = false
-    @Published private(set) var scannedItems = 0
     @Published var errorInfo: String?
 
-    func refresh(apps: [LCAppModel], hiddenApps: [LCAppModel], force: Bool = false) async {
+    func refresh(apps: [LCAppModel], hiddenApps: [LCAppModel]) async {
         guard !isCalculating else {
             return
         }
 
-        let unlocked = DataManager.shared.model.isHiddenAppUnlocked
-        let visible = apps + (unlocked ? hiddenApps : [])
-        let key = visible.map { liveBoardAppKey($0) + $0.uiContainers.map { $0.folderName }.joined() }.sorted().joined(separator: "|") + String(unlocked)
-        if let cached = Self.cached, cached.key == key {
-            breakdown = cached.value; lastCalculated = cached.date; skippedEntries = cached.skipped
-            if !force && Date().timeIntervalSince(cached.date) < 300 { return }
-        } else { breakdown = nil; lastCalculated = nil }
         isCalculating = true
-        scannedItems = 0
-        let progressTask = Task { [weak self] in
-            while !Task.isCancelled {
-                self?.scannedItems = StrataStorageIndex.shared.progress.scanned
-                try? await Task.sleep(nanoseconds: 400_000_000)
-            }
-        }
-        defer { isCalculating = false; progressTask.cancel() }
+        defer { isCalculating = false }
         errorInfo = nil
-        let maxAge: TimeInterval = force ? 0 : 300
+        breakdown = nil
 
         do {
-            let result = try await Self.scans.run(key: key) {
-                try await StrataStorageIndex.shared.prepare([LCPath.docPath, LCPath.lcGroupDocPath, FileManager.default.temporaryDirectory] + FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask), maxAge: maxAge)
-                let value = try await Self.calculateBreakdown(apps: apps, hiddenApps: hiddenApps)
-                return (value, await StrataStorageIndex.shared.skippedEntries)
-            }
-            let value = result.0
-            skippedEntries = result.1
-            guard unlocked == DataManager.shared.model.isHiddenAppUnlocked else { breakdown = nil; lastCalculated = nil; return }
-            breakdown = value; lastCalculated = Date()
-            Self.cached = (key, value, lastCalculated!, skippedEntries)
+            breakdown = try await Self.calculateBreakdown(apps: apps, hiddenApps: hiddenApps)
         } catch {
             errorInfo = error.localizedDescription
         }
     }
-
-    func clearForPrivacyChange() { breakdown = nil; lastCalculated = nil; Self.cached = nil; Self.scans.cancel() }
 
     private enum StorageCategory {
         case appBundle
@@ -300,11 +270,6 @@ final class LCStorageManagementModel: ObservableObject {
     }
 
     nonisolated private static func calculateSize(at url: URL) async throws -> Int64 {
-        if let indexed = await StrataStorageIndex.shared.size(url) { return indexed }
-        return try await calculateUnindexedSize(at: url)
-    }
-
-    nonisolated private static func calculateUnindexedSize(at url: URL) async throws -> Int64 {
         let fileManager = FileManager.default
         let resourceKeys: Set<URLResourceKey> = [
             .isRegularFileKey,
@@ -325,7 +290,7 @@ final class LCStorageManagementModel: ObservableObject {
         for case let fileURL as URL in enumerator {
             try Task.checkCancellation()
 
-            guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys) else { continue }
+            let resourceValues = try fileURL.resourceValues(forKeys: resourceKeys)
             guard resourceValues.isRegularFile == true else {
                 continue
             }

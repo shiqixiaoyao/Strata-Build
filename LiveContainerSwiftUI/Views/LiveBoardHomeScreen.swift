@@ -3,7 +3,6 @@ import PhotosUI
 import UniformTypeIdentifiers
 
 func liveBoardAppKey(_ app: LCAppModel) -> String {
-    if let shortcut = app.appInfo as? StrataPhoneAppInfo { return "phone:" + shortcut.entryID.uuidString }
     if app.appInfo is BuiltInSideStoreAppInfo { return "builtin:sidestore" }
     return "\(app.uiIsShared ? "shared" : "local"):\(app.appInfo.relativeBundlePath ?? app.bundleIdentifier)"
 }
@@ -20,19 +19,11 @@ struct LiveBoardHomeScreen: View {
     var launchInGameMode: ((LCAppModel) -> Void)? = nil
     var launchWithMetalHUD: ((LCAppModel) -> Void)? = nil
     var launchMultitask: ((LCAppModel) -> Void)? = nil
+    /// 主屏删除 App 的落地方，由 `LCAppListView` 注入；第二个参数表示是否连数据容器一起清。
+    var uninstall: ((LCAppModel, Bool) -> Void)? = nil
     @ObservedObject private var appCustomization = LiveBoardAppCustomization.shared
     @State private var appearanceApp: LiveBoardAppearanceSelection?
     @State private var jitSetup = false
-    @State private var storageSetup = false
-    @State private var memorySetup = false
-    @State private var refreshSetup = false
-    @State private var runtimeSetup = false
-    @State private var frameGenSetup = false
-    @State private var frameGenApp: LCAppModel?
-    @ObservedObject private var toolsRefresh = StrataAutoRefresh.shared
-    @StateObject private var toolsStorage = LCStorageManagementModel()
-    @EnvironmentObject private var toolsSharedModel: SharedModel
-    @State private var toolsMemory: [String: Any] = [:]
     @AppStorage("LiveBoardHomeCategories", store: LCUtils.appGroupUserDefault) private var homeCategories = "[\"Games\",\"Ports\",\"Tools\"]"
     @State private var addingCategory = false
     @State private var categoryName = ""
@@ -85,16 +76,11 @@ struct LiveBoardHomeScreen: View {
     @State private var newFolderApp: String?
     @State private var folderName = ""
     @State private var wallpaperError: String?
+    @State private var deletingApp: LCAppModel?
+    @State private var pendingDataDeletion: LCAppModel?
 
     private var appKeys: [String] { apps.map(liveBoardAppKey) }
-    private var appIdentities: [ObjectIdentifier] { apps.map(ObjectIdentifier.init) }
     @State private var appMap: [String: LCAppModel] = [:]
-    /// 刚安装 / 刚更新完的图标 key。用静态变量跨视图重建保留：进入管理库安装时
-    /// 主屏幕会被 `manageLibrary` 分支整个换掉，回来时本视图是新建的。
-    private static var knownKeys: Set<String> = []
-    private static var knownModels: [String: ObjectIdentifier] = [:]
-    private static var bootstrapped = false
-    @State private var entranceKeys: Set<String> = []
     private var favoriteKeys: [String] { (try? JSONDecoder().decode([String].self, from: Data(favorites.utf8))) ?? [] }
     private var wallpaperURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -151,8 +137,6 @@ struct LiveBoardHomeScreen: View {
                 }
             })
             .onChange(of: appKeys) { _ in reconcile() }
-            // 覆盖安装会沿用同一个 bundle 目录，key 不变但模型换了人 → 单独盯一次身份。
-            .onChange(of: appIdentities) { _ in reconcile() }
             .onChange(of: layout) { savedLayout = $0.encoded; page = min(page, layout.pages.count + 1) }
             .onAppear {
                 layout = LiveBoardHomeLayout.decode(savedLayout)
@@ -163,8 +147,6 @@ struct LiveBoardHomeScreen: View {
         }
         .onChange(of: scenePhase) { phase in if phase == .active { wallpapers.reload() } }
         .background(LiveBoardOrientationLock(mask: .portrait))
-        .onChange(of: categories) { _ in LiveBoardSharedCategories.importFromHome() }
-        .onChange(of: homeCategories) { _ in LiveBoardSharedCategories.importFromHome() }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .alert("New Home category", isPresented: $addingCategory) {
             TextField("Category name", text: $categoryName)
@@ -178,13 +160,6 @@ struct LiveBoardHomeScreen: View {
             }
             Button("Cancel", role: .cancel) { }
         }
-        .sheet(isPresented: $storageSetup) {
-            NavigationView { LCStorageManagementView().toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { storageSetup = false } } } }
-        }
-        .sheet(isPresented: $memorySetup) { NavigationView { StrataMemorySettings().toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { memorySetup = false } } } } }
-        .sheet(isPresented: $runtimeSetup) { if #available(iOS 16.0, *) { NavigationView { StrataRuntimeCenter(apps: toolsSharedModel.apps + toolsSharedModel.hiddenApps, launch: { app in runtimeSetup = false; launch(app) }, manage: { app in runtimeSetup = false; manage(app) }).toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { runtimeSetup = false } } } } } }
-        .sheet(isPresented: $frameGenSetup) { NavigationView { StrataFrameGenSettings(apps: apps, selected: frameGenApp).toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { frameGenSetup = false } } } } }
-        .sheet(isPresented: $refreshSetup) { NavigationView { StrataAutoRefreshSettings().toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { refreshSetup = false } } } } }
         .sheet(isPresented: $jitSetup) { LiveBoardJITSetup() }
         .sheet(isPresented: $customizing, onDismiss: {
             if pendingHomeSheet == "widgets" { addingWidget = true }
@@ -243,6 +218,27 @@ struct LiveBoardHomeScreen: View {
         .alert("Image", isPresented: Binding(get: { wallpaperError != nil }, set: { if !$0 { wallpaperError = nil } })) {
             Button("OK") { wallpaperError = nil }
         } message: { Text(wallpaperError ?? "") }
+        .alert("Delete App?", isPresented: Binding(get: { deletingApp != nil }, set: { if !$0 { deletingApp = nil } }), presenting: deletingApp) { app in
+            Button("Cancel", role: .cancel) { deletingApp = nil }
+            Button("Delete", role: .destructive) {
+                deletingApp = nil
+                if app.appInfo.containers.isEmpty {
+                    uninstall?(app, false)
+                } else {
+                    // 让上面的 alert 先收起来，再弹数据选择，两个弹窗同时挂在一层上会互相顶掉
+                    DispatchQueue.main.async { pendingDataDeletion = app }
+                }
+            }
+        } message: { app in
+            Text(LCStr("%@ will be removed from this device.", "%@ will be removed from this device.", appCustomization.name(app)))
+        }
+        .confirmationDialog("Also delete its data?", isPresented: Binding(get: { pendingDataDeletion != nil }, set: { if !$0 { pendingDataDeletion = nil } }), titleVisibility: .visible, presenting: pendingDataDeletion) { app in
+            Button("Delete App and Data", role: .destructive) { pendingDataDeletion = nil; uninstall?(app, true) }
+            Button("Delete App Only", role: .destructive) { pendingDataDeletion = nil; uninstall?(app, false) }
+            Button("Cancel", role: .cancel) { pendingDataDeletion = nil }
+        } message: { app in
+            Text(LCStr("%@'s saved games and documents will be deleted too. This cannot be undone.", "%@'s saved games and documents will be deleted too. This cannot be undone.", appCustomization.name(app)))
+        }
     }
 
     private var background: some View { wallpaperSurface(animate: true) }
@@ -323,10 +319,10 @@ struct LiveBoardHomeScreen: View {
                 }
                 Menu("Move to Page") {
                     ForEach(layout.pages.indices, id: \.self) { target in
-                        Button(LCStr("strata.home.page %lld", "Page %lld", target + 1)) { layout.place(widget.id, on: target); page = target + 1 }
+                        Button(LCStr("strata.home.pageNumber", "Page %lld", target + 1)) { layout.place(widget.id, on: target); page = target + 1 }
                     }
                 }
-        Button("Edit Home Screen", systemImage: "square.grid.3x3") { editing = true }
+                Button("Edit Home Screen", systemImage: "square.grid.3x3") { editing = true }
                 Button("Remove Widget", systemImage: "trash", role: .destructive) { removeHomeWidget(widget.id) }
             }
             .accessibilityIdentifier("home.widget.\(widget.kind.rawValue)")
@@ -335,7 +331,7 @@ struct LiveBoardHomeScreen: View {
                     Button { removeHomeWidget(widget.id) } label: {
                         Image(systemName: "minus").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
                             .frame(width: 24, height: 24).liveBoardGlass(radius: 12)
-                    }.offset(x: -7, y: -7).accessibilityLabel(LCStr("strata.home.removeWidget %@", "Remove %@ widget", widget.kind.title)).accessibilityIdentifier("home.widget.remove.\(widget.id)")
+                    }.offset(x: -7, y: -7).accessibilityLabel(LCStr("strata.home.widgetRemoveA11y", "Remove %@ widget", widget.kind.title)).accessibilityIdentifier("home.widget.remove.\(widget.id)")
                 }
             }
             .onDrag { NSItemProvider(object: widget.id as NSString) }
@@ -348,7 +344,7 @@ struct LiveBoardHomeScreen: View {
             } else if let app = appMap[key] {
                 LiveBoardHomeIcon(app: app, title: title(key), size: largeIcons ? 76 : 64,
                                   showLabel: showLabel, dark: darkIcons, editing: editing,
-                                  reduceMotion: reduceMotion, animateEntrance: entranceKeys.contains(key), action: {
+                                  reduceMotion: reduceMotion, action: {
                     if editing { return }
                     launch(app)
                 })
@@ -359,7 +355,7 @@ struct LiveBoardHomeScreen: View {
                             Image(systemName: "minus").font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(.white).frame(width: 24, height: 24)
                                 .liveBoardGlass(radius: 12)
-                        }.offset(x: -7, y: -7).accessibilityLabel(LCStr("strata.home.removeFromHome %@", "Remove %@ from Home Screen", title(key)))
+                        }.offset(x: -7, y: -7).accessibilityLabel(LCStr("strata.home.appRemoveA11y", "Remove %@ from Home Screen", title(key)))
                     }
                 }
             }
@@ -378,24 +374,16 @@ struct LiveBoardHomeScreen: View {
     }
 
     @ViewBuilder private func appMenu(_ key: String, app: LCAppModel) -> some View {
+        Button(app.strataSwitcherPinned ? "Unpin from app switcher".loc : "Pin to app switcher".loc, systemImage: "pin") { app.strataSwitcherPinned.toggle() }
+        if let launchInGameMode { Button("Request Game Mode", systemImage: "gamecontroller.fill") { launchInGameMode(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo) }
+        if let launchMultitask { Button("Multitask", systemImage: "rectangle.on.rectangle") { launchMultitask(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo) }
+        if let launchWithMetalHUD { Button("Launch with Metal HUD", systemImage: "gauge.with.dots.needle.67percent") { launchWithMetalHUD(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo) }
         Button("Launch", systemImage: "play.fill") { launch(app) }.disabled(app.isAppRunning || app.isSigningInProgress)
-        if !(app.appInfo is StrataPhoneAppInfo) {
-        Menu("Launch options", systemImage: "play.circle") {
-        if let launchInGameMode { Button("Request Game Mode", systemImage: "gamecontroller.fill") { launchInGameMode(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo || app.appInfo is StrataPhoneAppInfo) }
-        if let launchMultitask { Button("Multitask", systemImage: "rectangle.on.rectangle") { launchMultitask(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo || app.appInfo is StrataPhoneAppInfo) }
-        if let launchWithMetalHUD { Button("Launch with Metal HUD", systemImage: "gauge.with.dots.needle.67percent") { launchWithMetalHUD(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo || app.appInfo is StrataPhoneAppInfo) }
-        if let launchWithJIT { Button("Launch with JIT", systemImage: "bolt.fill") { launchWithJIT(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo || app.appInfo is StrataPhoneAppInfo) }
-        }
-        }
+        if let launchWithJIT { Button("Launch with JIT", systemImage: "bolt.fill") { launchWithJIT(app) }.disabled(app.appInfo is BuiltInSideStoreAppInfo) }
         Button("Edit Home Screen", systemImage: "square.grid.3x3") { editing = true }
-        Menu("Customize", systemImage: "paintbrush") {
-            Button("Frame Generation", systemImage: "square.3.layers.3d") { frameGenApp = app; frameGenSetup = true }.disabled(app.appInfo is BuiltInSideStoreAppInfo || app.appInfo is StrataPhoneAppInfo)
         Button("Rename", systemImage: "pencil") { renameValue = title(key); renameKey = key }
         Button("Change app icon", systemImage: "photo") { appearanceApp = LiveBoardAppearanceSelection(app: app) }
-        }
-        Menu("Organize", systemImage: "folder") {
-        Button(app.strataSwitcherPinned ? "Unpin from app switcher" : "Pin to app switcher", systemImage: "pin") { app.strataSwitcherPinned.toggle() }
-        Button(favoriteKeys.contains(key) ? "Unfavorite" : "Favorite", systemImage: "star") {
+        Button(favoriteKeys.contains(key) ? "Unfavorite".loc : "Favorite".loc, systemImage: "star") {
             var values = favoriteKeys
             if values.contains(key) { values.removeAll { $0 == key } } else { values.append(key) }
             if let data = try? JSONEncoder().encode(values), let string = String(data: data, encoding: .utf8) { favorites = string }
@@ -407,7 +395,7 @@ struct LiveBoardHomeScreen: View {
         }
         Menu("Move to Page", systemImage: "rectangle.on.rectangle") {
             ForEach(layout.pages.indices, id: \.self) { index in
-                Button("Page \(index + 1)") { layout.place(key, on: index); reconcile() }
+                Button(LCStr("strata.home.pageNumber", "Page %lld", index + 1)) { layout.place(key, on: index); reconcile() }
             }
             Button("New Page") { let target = layout.pages.count; layout.place(key, on: target); page = target + 1; reconcile() }
         }
@@ -425,9 +413,13 @@ struct LiveBoardHomeScreen: View {
             Button("New Category…") { categoryApp = key; categoryName = ""; addingCategory = true }
             Button("Uncategorized") { setCategory(nil, key: key) }
         }
-        }
         Button("App Settings", systemImage: "gearshape") { searching = false; manage(app) }
         Button("Remove from Home Screen", systemImage: "minus.circle", role: .destructive) { layout.hide(key); reconcile() }
+        if uninstall != nil, !(app.appInfo is BuiltInSideStoreAppInfo) {
+            Divider()
+            Button("Delete App", systemImage: "trash", role: .destructive) { deletingApp = app }
+                .disabled(app.isAppRunning || app.isSigningInProgress)
+        }
     }
 
     private func dock(width: CGFloat) -> some View {
@@ -449,7 +441,7 @@ struct LiveBoardHomeScreen: View {
     }
 
     private func pagerPages(width: CGFloat, height: CGFloat) -> [AnyView] {
-        [AnyView(controls)] + layout.pages.indices.map { index in
+        [AnyView(controls.padding(.top, 20).padding(.bottom, 126))] + layout.pages.indices.map { index in
             AnyView(homePage(index, width: width, height: max(400, height - 126)))
         } + [AnyView(appLibrary)]
     }
@@ -464,7 +456,7 @@ struct LiveBoardHomeScreen: View {
                 ForEach(0..<layout.pages.count, id: \.self) { index in
                     Button { page = index + 1 } label: {
                         StrataHomePageDot(motion: pagerMotion, page: index + 1).frame(width: 22, height: 32)
-                    }.accessibilityLabel("Page \(index + 1)").accessibilityValue(page == index + 1 ? "Selected" : "")
+                    }.accessibilityLabel(LCStr("strata.home.pageNumber", "Page %lld", index + 1)).accessibilityValue(page == index + 1 ? LCStr("Selected", "Selected") : "")
                         .onDrop(of: [UTType.text], isTargeted: nil) { providers in
                             acceptDrop(providers) { key in layout.place(key, on: index); openFolder = nil; page = index + 1; reconcile() }
                         }
@@ -512,15 +504,15 @@ struct LiveBoardHomeScreen: View {
             }
         }.buttonStyle(.plain)
         .contextMenu {
-        Button("Edit Home Screen", systemImage: "square.grid.3x3") { editing = true }
+            Button("Edit Home Screen", systemImage: "square.grid.3x3") { editing = true }
             Button("Rename", systemImage: "pencil") { renameKey = folder.id; renameValue = folder.name }
             Menu("Move to Page") {
-                ForEach(layout.pages.indices, id: \.self) { index in Button("Page \(index + 1)") { layout.place(folder.id, on: index) } }
+                ForEach(layout.pages.indices, id: \.self) { index in Button(LCStr("strata.home.pageNumber", "Page %lld", index + 1)) { layout.place(folder.id, on: index) } }
             }
             Button("Remove Folder", systemImage: "folder.badge.minus", role: .destructive) { layout.dissolveFolder(folder.id); reconcile() }
         }
         .onDrop(of: [UTType.text], isTargeted: nil) { providers in acceptDrop(providers) { key in layout.put(key, in: folder.id); reconcile() } }
-        .accessibilityLabel(LCStr("strata.home.folderSummary %@ %lld", "%@, folder, %lld apps", folder.name, folder.apps.count))
+        .accessibilityLabel(LCStr("strata.home.folderA11y", "%1$@, folder, %2$lld apps", folder.name, folder.apps.count))
     }
 
     private func folderOverlay(_ folder: LiveBoardHomeLayout.Folder, width: CGFloat) -> some View {
@@ -562,38 +554,41 @@ struct LiveBoardHomeScreen: View {
     }
 
     private var controls: some View {
-        StrataToolsPage(tools: [
-            .init(id: "runtimes", title: "Runtime Manager".loc, detail: "Guests · Files · Backups · Signing".loc, symbol: "shippingbox.fill", action: { runtimeSetup = true }),
-            .init(id: "interface", title: "Interface".loc, detail: "iOS Home Screen".loc, symbol: "square.grid.3x3.fill", action: openInterface),
-            .init(id: "refresh", title: "Automatic refresh".loc, detail: toolsRefresh.enabled ? LCStr("Every %lld days · SideStore", "Every %lld days · SideStore", toolsRefresh.days) : "Schedule & refresh apps".loc, symbol: "arrow.triangle.2.circlepath", action: { refreshSetup = true }),
-            .init(id: "framegen", title: "Frame Generation".loc, detail: "2× Metal · experimental".loc, symbol: "square.3.layers.3d", action: { frameGenApp = nil; frameGenSetup = true }),
-            .init(id: "sources", title: "lc.tabView.sources".loc, detail: secondaryInstance ? "Manage in primary instance".loc : "Discover & install".loc, symbol: "books.vertical", disabled: secondaryInstance, action: { openTab(.sources) }),
-            .init(id: "tweaks", title: "lc.tabView.tweaks".loc, detail: secondaryInstance ? "Manage in primary instance".loc : "App extensions".loc, symbol: "wrench.and.screwdriver", disabled: secondaryInstance, action: { openTab(.tweaks) }),
-            .init(id: "wallpaper", title: "Wallpaper".loc, detail: "Customize".loc, symbol: "photo", action: { customizing = true }),
-            .init(id: "apps", title: "Apps".loc, detail: "Install & manage".loc, symbol: "square.stack.3d.up", action: openManagement),
-            .init(id: "settings", title: "lc.tabView.settings".loc, detail: StrataVersion.display, symbol: "gearshape.fill", action: { NotificationCenter.default.post(name: .strataOpenSettings, object: nil) }),
-            .init(id: "jit", title: "JIT".loc, detail: "Setup & providers".loc, symbol: "bolt.fill", action: { jitSetup = true }),
-            .init(id: "storage", title: "Storage".loc, detail: toolsStorageDetail, symbol: "internaldrive", disabled: secondaryInstance, action: { storageSetup = true }),
-            .init(id: "memory", title: "Memory".loc, detail: toolsMemoryDetail, symbol: "memorychip", action: { memorySetup = true })
-        ])
-        .task(id: page == 0) {
-            guard page == 0 else { return }
-            toolsMemory = LCUtils.strataMemoryStatus() as? [String: Any] ?? [:]
-            await toolsStorage.refresh(apps: toolsSharedModel.apps, hiddenApps: toolsSharedModel.hiddenApps)
-            while !Task.isCancelled {
-                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
-                toolsMemory = LCUtils.strataMemoryStatus() as? [String: Any] ?? [:]
-            }
+        ScrollView {
+            VStack(spacing: 16) {
+                Button(action: openInterface) { controlCard("Interface", detail: "iOS Home Screen", symbol: "square.grid.3x3.fill", wide: true) }
+                HStack(spacing: 16) {
+                    Button { openTab(.sources) } label: {
+                        controlCard("lc.tabView.sources".loc, detail: secondaryInstance ? "Manage in primary instance".loc : "Discover & install".loc, symbol: "books.vertical", wide: false)
+                    }.disabled(secondaryInstance).accessibilityIdentifier("home.controls.sources")
+                    Button { openTab(.tweaks) } label: {
+                        controlCard("lc.tabView.tweaks".loc, detail: secondaryInstance ? "Manage in primary instance".loc : "App extensions".loc, symbol: "wrench.and.screwdriver", wide: false)
+                    }.disabled(secondaryInstance).accessibilityIdentifier("home.controls.tweaks")
+                }
+                HStack(spacing: 16) {
+                    Button { customizing = true } label: { controlCard("Wallpaper", detail: "Customize", symbol: "photo", wide: false) }.accessibilityIdentifier("home.controls.wallpaper")
+                    Button(action: openManagement) { controlCard("Apps", detail: "Install & manage", symbol: "square.stack.3d.up", wide: false) }
+                }
+                HStack(spacing: 16) {
+                    Button { openTab(.settings) } label: { controlCard("lc.tabView.settings".loc, detail: "LiveContainer", symbol: "gearshape.fill", wide: false) }.accessibilityIdentifier("home.controls.settings")
+                    Button { jitSetup = true } label: { controlCard("JIT", detail: "Setup & providers", symbol: "bolt.fill", wide: false) }.accessibilityIdentifier("home.controls.jit")
+                }
+            }.buttonStyle(.plain).padding(.horizontal, 22).padding(.top, 12).padding(.bottom, 20)
         }
     }
-    private var toolsStorageDetail: String {
-        if let breakdown = toolsStorage.breakdown { return ByteCountFormatter.string(fromByteCount: breakdown.totalSize, countStyle: .file) + " used by Strata" }
-        return toolsStorage.errorInfo == nil ? "Calculating…" : "Open storage management"
-    }
-    private var toolsMemoryDetail: String {
-        guard let available = toolsMemory["availableMB"] as? NSNumber else { return "Memory & signing permissions" }
-        let used = (toolsMemory["usedMB"] as? NSNumber).map { "\($0.uint64Value) MB used\n" } ?? ""
-        return used + "\(available.uint64Value) MB available to Strata"
+    private func controlCard(_ title: String, detail: String, symbol: String, wide: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 24)).foregroundStyle(.white.opacity(0.95))
+            Spacer(minLength: 2)
+            Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+            if !detail.isEmpty {
+                Text(detail).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: wide ? 124 : 128)
+        .liveBoardGlass(radius: 28)
     }
 
     private var searchResults: [LCAppModel] {
@@ -735,9 +730,9 @@ struct LiveBoardHomeScreen: View {
                             .frame(height: 135).frame(maxWidth: .infinity).clipped().clipShape(RoundedRectangle(cornerRadius: 14))
                             .overlay(alignment: .topTrailing) { if selectedWallpaper == item.id && (wallpaperStyle == "catalogue" || wallpaperStyle == "photo") { Image(systemName: "checkmark.circle.fill").padding(6).foregroundStyle(.blue) } }
                         Text(item.name).font(.caption).lineLimit(1)
-                        Label(item.live ? "LIVE" : "STATIC", systemImage: item.live ? "play.circle" : "photo").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                        Label(item.live ? "LIVE".loc : "STATIC".loc, systemImage: item.live ? "play.circle" : "photo").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
                     }
-                }.buttonStyle(.plain).accessibilityLabel(LCStr("strata.home.applyWallpaper %@ %@", "Apply %@, %@ wallpaper", item.name, item.live ? "live".loc : "static".loc))
+                }.buttonStyle(.plain).accessibilityLabel(LCStr("strata.home.wallpaperApplyA11y", "Apply %1$@, %2$@ wallpaper", item.name, item.live ? LCStr("strata.home.wallpaperLive", "live") : LCStr("strata.home.wallpaperStatic", "static")))
             }
         }.padding(.vertical, 8)
     }
@@ -917,15 +912,15 @@ struct LiveBoardHomeScreen: View {
                         HStack {
                             Image(systemName: "square.grid.3x3").font(.title2).foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Page \(index + 1)").font(.headline)
-                                Text("\(layout.pages[index].compactMap { $0 }.count) items").font(.caption).foregroundStyle(.secondary)
+                                Text(LCStr("strata.home.pageNumber", "Page %lld", index + 1)).font(.headline)
+                                Text(LCStr("strata.home.itemsCount", "%lld items", layout.pages[index].compactMap { $0 }.count)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button { page = index + 1; managingPages = false } label: { Image(systemName: page == index + 1 ? "checkmark.circle.fill" : "circle") }
-                                .accessibilityLabel(LCStr("strata.home.showPage %lld", "Show page %lld", index + 1))
+                                .accessibilityLabel(LCStr("strata.home.showPageA11y", "Show page %lld", index + 1))
                             Button(role: .destructive) { removingPage = index; showingRemovePage = true } label: { Image(systemName: "minus.circle.fill").padding(6) }
                                 .disabled(layout.pages.count <= 1)
-                                .accessibilityLabel(LCStr("strata.home.removePage %lld", "Remove page %lld", index + 1)).accessibilityIdentifier("home.removePage.\(index)")
+                                .accessibilityLabel(LCStr("strata.home.removePageA11y", "Remove page %lld", index + 1)).accessibilityIdentifier("home.removePage.\(index)")
                         }.buttonStyle(.borderless)
                     }
                 } footer: { Text("Keep at least one Home page. Removing a page sends its apps to the App Library and removes its widgets.") }
@@ -933,7 +928,7 @@ struct LiveBoardHomeScreen: View {
             }
             .navigationTitle("Home Pages").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { managingPages = false } } }
-            .confirmationDialog(LCStr("strata.home.removePageConfirm %lld", "Remove Page %lld?", (removingPage ?? 0) + 1), isPresented: $showingRemovePage, titleVisibility: .visible, presenting: removingPage) { index in
+            .confirmationDialog(LCStr("strata.home.removePageTitle", "Remove Page %lld?", (removingPage ?? 0) + 1), isPresented: $showingRemovePage, titleVisibility: .visible, presenting: removingPage) { index in
                 Button("Remove Page", role: .destructive) {
                     var updated = layout
                     let removed = updated.removePage(at: index)
@@ -962,7 +957,7 @@ struct LiveBoardHomeScreen: View {
                             Text("Liquid Glass").tag(LiveBoardHomeLayout.Widget.Appearance.glass)
                         }.pickerStyle(.segmented).accessibilityIdentifier("home.widget.background")
                         Picker("Page", selection: Binding(get: { layout.pages.firstIndex { $0.contains(id) } ?? 0 }, set: { layout.place(id, on: $0); page = $0 + 1 })) {
-                            ForEach(layout.pages.indices, id: \.self) { index in Text("Page \(index + 1)").tag(index) }
+                            ForEach(layout.pages.indices, id: \.self) { index in Text(LCStr("strata.home.pageNumber", "Page %lld", index + 1)).tag(index) }
                         }
                         if widget.kind == .photo {
                             Button("Change Photo", systemImage: "photo") {
@@ -1020,34 +1015,7 @@ struct LiveBoardHomeScreen: View {
         let file = layout.widgets.first { $0.id == id }?.photo
         layout.removeWidget(id); widgetPhotos.remove(file)
     }
-    private func reconcile() {
-        // 只有「见过一轮」之后才算得出新增/替换；冷启动加载整屏图标不该挨个弹一遍。
-        var installed: Set<String> = []
-        var replaced: Set<String> = []
-        if Self.bootstrapped {
-            installed.formUnion(Set(appKeys).subtracting(Self.knownKeys))
-            for app in apps {
-                let key = liveBoardAppKey(app)
-                if let previous = Self.knownModels[key], previous != ObjectIdentifier(app) { replaced.insert(key) }
-            }
-        }
-        Self.knownKeys = Set(appKeys)
-        Self.knownModels = Dictionary(apps.map { (liveBoardAppKey($0), ObjectIdentifier($0)) }, uniquingKeysWith: { first, _ in first })
-        Self.bootstrapped = true
-        appMap = Dictionary(apps.map { (liveBoardAppKey($0), $0) }, uniquingKeysWith: { first, _ in first })
-        layout.reconcile(appKeys, favorites: favoriteKeys)
-
-        let entered = installed.union(replaced)
-        guard !entered.isEmpty else { return }
-        entranceKeys.formUnion(entered)
-        // 新装的 App 落在最后一页；人还在第一页的话动画等于白放，跟着滑过去。
-        if let key = apps.map(liveBoardAppKey).first(where: { installed.contains($0) }),
-           let index = layout.pages.firstIndex(where: { slots in slots.contains(where: { $0 == key }) }) {
-            page = index + 1
-        }
-        // 入场 / 更新动画各播一次，之后撤掉标记，避免每次重绘都重播。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { entranceKeys.subtract(entered) }
-    }
+    private func reconcile() { appMap = Dictionary(apps.map { (liveBoardAppKey($0), $0) }, uniquingKeysWith: { first, _ in first }); layout.reconcile(appKeys, favorites: favoriteKeys) }
     private func title(_ key: String) -> String { appMap[key].map { appCustomization.name($0) } ?? "App" }
     private func addPage() { layout.pages.append(Array(repeating: nil, count: LiveBoardHomeLayout.capacity)); page = layout.pages.count }
     private func setCategory(_ value: String?, key: String) {
@@ -1076,18 +1044,15 @@ private struct LiveBoardHomeIcon: View {
     let dark: Bool
     let editing: Bool
     let reduceMotion: Bool
-    let animateEntrance: Bool
     let action: () -> Void
-
-    @State private var appeared = false
-    @State private var bump: CGFloat = 1
-
-    private var corner: CGFloat { size * 0.23 }
-
     var body: some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                artwork
+                LiveBoardIconImage(app: app, dark: dark)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
+                    .overlay { if app.isSigningInProgress { ProgressView(value: app.signProgress).padding(8).background(.ultraThinMaterial) } }
+                    .modifier(LiveBoardEditWobble(active: editing && !reduceMotion))
                 if showLabel {
                     Text(title).font(.system(size: 12, weight: .regular)).lineLimit(1)
                         .foregroundColor(.white).shadow(color: .black.opacity(0.85), radius: 2, x: 0, y: 1).frame(width: 82)
@@ -1097,70 +1062,8 @@ private struct LiveBoardHomeIcon: View {
         .buttonStyle(LiveBoardHomePressStyle(reduceMotion: reduceMotion))
         .disabled(!editing && (app.isAppRunning || app.isSigningInProgress))
         .accessibilityLabel(title)
-        .accessibilityHint(editing ? "Drag to rearrange" : "Launch app. Touch and hold for more actions.")
+        .accessibilityHint(editing ? "Drag to rearrange".loc : "Launch app. Touch and hold for more actions.".loc)
 
-    }
-
-    /// 图标本体。新安装的从 0.62 倍弹到位，覆盖安装的收一下再弹回，
-    /// 签名 / 安装中的压暗并显示环形进度（iOS 桌面的做法）。
-    private var artwork: some View {
-        LiveBoardIconImage(app: app, dark: dark)
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-            .overlay { signingOverlay }
-            .modifier(LiveBoardEditWobble(active: editing && !reduceMotion))
-            // 未标记进场的图标首帧就按正常尺寸画，避免整屏闪一下。
-            .scaleEffect(((appeared || !animateEntrance) ? 1 : 0.62) * bump)
-            .opacity((appeared || !animateEntrance) ? 1 : 0)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: app.isSigningInProgress)
-            .onAppear {
-                guard !appeared else { return }
-                if animateEntrance && !reduceMotion {
-                    withAnimation(.spring(response: 0.46, dampingFraction: 0.72)) { appeared = true }
-                } else {
-                    appeared = true
-                }
-            }
-            // 覆盖安装：key 没变，模型换了，给一次「重新装好」的收放。
-            .onChange(of: animateEntrance) { wants in if wants { playBump(peak: 0.9) } }
-            // 签名结束：进度走满后弹一下。
-            .onChange(of: app.isSigningInProgress) { signing in
-                if !signing && app.signProgress > 0.99 { playBump(peak: 1.08) }
-            }
-    }
-
-    @ViewBuilder private var signingOverlay: some View {
-        if app.isSigningInProgress {
-            ZStack {
-                RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color.black.opacity(0.32))
-                ring
-            }
-            .transition(.opacity)
-            .allowsHitTesting(false)
-        }
-    }
-
-    private var ring: some View {
-        let line = max(2, size * 0.052)
-        let clamped = min(1, max(0.02, app.signProgress))
-        let fraction = CGFloat(clamped)
-        return ZStack {
-            Circle().stroke(Color.white.opacity(0.28), lineWidth: line)
-            Circle()
-                .trim(from: 0, to: fraction)
-                .stroke(Color.white, style: StrokeStyle(lineWidth: line, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: app.signProgress)
-        }
-        .frame(width: size * 0.44, height: size * 0.44)
-    }
-
-    private func playBump(peak: CGFloat) {
-        guard !reduceMotion else { return }
-        withAnimation(.easeOut(duration: 0.12)) { bump = peak }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.66)) { bump = 1 }
-        }
     }
 }
 private struct LiveBoardEditWobble: ViewModifier {

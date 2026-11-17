@@ -4,12 +4,7 @@ import SwiftUI
 @MainActor final class LiveBoardAppCustomization: ObservableObject {
     static let shared = LiveBoardAppCustomization()
     @Published private(set) var revision = 0
-    // 自定义图标写到盘上是 512×512，解出来一张 1MB；不设上限的话改几十次图标就吃掉几十 MB。
-    private let cache: NSCache<NSString, UIImage> = {
-        let cache = NSCache<NSString, UIImage>()
-        cache.totalCostLimit = 32 * 1024 * 1024
-        return cache
-    }()
+    private let cache = NSCache<NSString, UIImage>()
     private let defaults = LCUtils.appGroupUserDefault
     private var names: [String: String] { defaults.dictionary(forKey: "StrataAppNames") as? [String: String] ?? [:] }
     private var icons: [String: String] { defaults.dictionary(forKey: "StrataAppIcons") as? [String: String] ?? [:] }
@@ -37,7 +32,7 @@ import SwiftUI
         guard let file = icons[liveBoardAppKey(app)] else { return nil }
         if let image = cache.object(forKey: file as NSString) { return image }
         guard let image = UIImage(contentsOfFile: directory.appendingPathComponent(file).path) else { return nil }
-        cache.setObject(image, forKey: file as NSString, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
+        cache.setObject(image, forKey: file as NSString)
         return image
     }
     func saveIcon(_ image: UIImage, app: LCAppModel) throws {
@@ -56,7 +51,7 @@ import SwiftUI
         var map = icons; let old = map.updateValue(file, forKey: liveBoardAppKey(app))
         defaults.set(map, forKey: "StrataAppIcons")
         if let old { try? FileManager.default.removeItem(at: directory.appendingPathComponent(old)) }
-        cache.setObject(result, forKey: file as NSString, cost: result.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
+        cache.setObject(result, forKey: file as NSString)
         revision += 1
     }
     func resetIcon(_ app: LCAppModel) {
@@ -91,7 +86,7 @@ struct LiveBoardAppAppearance: View {
                     LiveBoardIconImage(app: app, dark: false).frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 16))
                     Button("Choose image from Photos") { choosingIcon = true }.accessibilityIdentifier("appearance.chooseIcon")
                     Button("Restore original icon") { customization.resetIcon(app) }
-                    Text("Names and icons appear in all interfaces. Console cover artwork stays separate.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Names and icons appear in all three interfaces. Console cover artwork stays separate.").font(.footnote).foregroundStyle(.secondary)
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
             }.navigationTitle("App appearance")
