@@ -563,14 +563,15 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     /// Reopens the guest iOS terminated while it was in the background (one shot, max 6 hours old).
     /// Uses the normal launch path so JIT, Game Mode and signing checks still apply.
     @MainActor private func consumeResumeLaunch() {
-        guard !sharedModel.registryLoading, let value = UserDefaults.standard.dictionary(forKey: "StrataResumeGuest") else { return }
-        guard let key = value["key"] as? String, let time = value["time"] as? Double else { UserDefaults.standard.removeObject(forKey: "StrataResumeGuest"); return }
+        let defaults = LCUtils.appGroupUserDefault
+        guard !sharedModel.registryLoading, let value = defaults.dictionary(forKey: "StrataResumeGuest") else { return }
+        guard let key = value["key"] as? String, let time = value["time"] as? Double else { defaults.removeObject(forKey: "StrataResumeGuest"); return }
         guard let app = launcherApps.first(where: { liveBoardAppKey($0) == key }) else {
-            if Date().timeIntervalSince1970 - time > 60 { UserDefaults.standard.removeObject(forKey: "StrataResumeGuest") }
+            if Date().timeIntervalSince1970 - time > 60 { defaults.removeObject(forKey: "StrataResumeGuest") }
             return
         }
-        UserDefaults.standard.removeObject(forKey: "StrataResumeGuest")
-        let enabled = LCUtils.appGroupUserDefault.object(forKey: "StrataResumeAfterSystemClose") as? Bool ?? false
+        defaults.removeObject(forKey: "StrataResumeGuest")
+        let enabled = defaults.object(forKey: "StrataResumeAfterSystemClose") as? Bool ?? true
         let age = Date().timeIntervalSince1970 - time
         guard enabled, age >= 0, age < 6 * 3600 else { return }
         Task { await launchFromLiveBoard(app) }

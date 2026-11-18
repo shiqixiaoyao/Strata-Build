@@ -41,8 +41,8 @@ struct LiveBoardRootView: View {
     @AppStorage("LiveBoardMode", store: LCUtils.appGroupUserDefault) private var mode = "ios"
     @State private var interfacePresented = false
     @State private var settingsPresented = false
-    @AppStorage("StrataResumeAfterSystemClose", store: LCUtils.appGroupUserDefault) private var resumeAfterSystemClose = false
-    @AppStorage("StrataKeepGuestAlive", store: LCUtils.appGroupUserDefault) private var keepGuestAlive = false
+    @AppStorage("StrataResumeAfterSystemClose", store: LCUtils.appGroupUserDefault) private var resumeAfterSystemClose = true
+    @AppStorage("StrataKeepGuestAlive", store: LCUtils.appGroupUserDefault) private var keepGuestAlive = true
     @State private var destinationPresented = false
 
     var body: some View {

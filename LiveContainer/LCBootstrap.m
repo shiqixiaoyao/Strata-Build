@@ -785,8 +785,14 @@ static NSData *StrataSilentWAV(void) {
     [data appendBytes:"data" length:4]; [data appendBytes:&dataSize length:4]; [data increaseLengthBy:dataSize];
     return data;
 }
+// Keep-alive is on unless the user turned it off. 4.0 shipped it as an opt-in setting whose @AppStorage
+// default is never written to disk, so `boolForKey` answered NO even with the switch showing as on.
+static BOOL StrataKeepAliveEnabled(void) {
+    if ([lcSharedDefaults objectForKey:@"StrataKeepGuestAlive"] == nil) return YES;
+    return [lcSharedDefaults boolForKey:@"StrataKeepGuestAlive"];
+}
 static void StrataKeepAliveStart(void) {
-    if (strataKeepAlivePlayer || ![lcSharedDefaults boolForKey:@"StrataKeepGuestAlive"]) return;
+    if (strataKeepAlivePlayer || !StrataKeepAliveEnabled()) return;
     AVAudioSession *session = AVAudioSession.sharedInstance;
     strataSavedCategory = session.category; strataSavedMode = session.mode; strataSavedOptions = session.categoryOptions;
     NSError *error = nil;
@@ -890,7 +896,7 @@ int LiveContainerMain(int argc, char *argv[]) {
     
     if([selectedApp isEqualToString:@"ui"]) {
         // Deliberate return to the launcher: never auto-resume the previous guest.
-        [lcUserDefaults removeObjectForKey:@"StrataResumeGuest"];
+        [lcSharedDefaults removeObjectForKey:@"StrataResumeGuest"];
         selectedApp = nil;
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
@@ -1013,18 +1019,20 @@ int LiveContainerMain(int argc, char *argv[]) {
         StrataStartMemoryOverlaySampler([LCSharedUtils appGroupID], isLiveProcess ? @"app" : @"Strata + app", controlsName);
         // iOS often terminates a backgrounded game to reclaim memory; the next cold start would then show the
         // launcher. Remember the guest only while it is in the background so the launcher can reopen it.
-        [lcUserDefaults removeObjectForKey:@"StrataResumeGuest"];
+        [lcSharedDefaults removeObjectForKey:@"StrataResumeGuest"];
         // 无缝切换（默认开）时 guest 跑在 LiveProcess.appex 里，扩展的后台寿命比主进程短得多，
         // 而这里原来排除了 isLiveProcess —— 等于扩展模式下完全没有保活。该扩展的 Info.plist
         // 本来就声明了 UIBackgroundModes: audio，所以一并放开；商店自己有保活，继续跳过。
         if (selectedApp && !isSideStore) {
             NSString *resumeKey = controlsKey;
             void (^rememberGuest)(NSNotification *) = ^(NSNotification *note) {
-                [lcUserDefaults setObject:@{@"key": resumeKey, @"time": @(NSDate.date.timeIntervalSince1970)} forKey:@"StrataResumeGuest"];
+                // 无缝模式下这段代码跑在 LiveProcess.appex 里，标准 UserDefaults 是扩展自己的域，
+                // 主 App 读不到；必须写进 app group，否则「被 iOS 杀掉后重开」永远不生效。
+                [lcSharedDefaults setObject:@{@"key": resumeKey, @"time": @(NSDate.date.timeIntervalSince1970)} forKey:@"StrataResumeGuest"];
                 StrataKeepAliveStart();
             };
             void (^forgetGuest)(NSNotification *) = ^(NSNotification *note) {
-                [lcUserDefaults removeObjectForKey:@"StrataResumeGuest"];
+                [lcSharedDefaults removeObjectForKey:@"StrataResumeGuest"];
                 StrataKeepAliveStop();
             };
             // 主进程走 UIKit 的前后台通知；跑在 LiveProcess.appex 里时 UIKit 那套不一定投递，
