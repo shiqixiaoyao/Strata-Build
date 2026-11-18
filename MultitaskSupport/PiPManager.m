@@ -46,8 +46,9 @@ static PiPManager* sharedInstance = nil;
 
 - (instancetype)init {
     NSError* error = nil;
-    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:&error];
-    [[AVAudioSession sharedInstance] setActive:YES withOptions:1 error:&error];
+    // 画中画只要「能出声」，不需要独占：之前没带 mixWithOthers，一 init 就把正在放的音乐掐了。
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:AVAudioSessionCategoryOptionMixWithOthers error:&error];
+    [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&error];
     return self;
 }
 

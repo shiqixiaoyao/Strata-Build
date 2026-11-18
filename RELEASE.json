@@ -1,9 +1,11 @@
 {
-  "version": "2.0.1",
-  "tag": "v2.0.1",
-  "developmentRevision": 26,
-  "liveContainerBase": "3.8.11",
-  "sourceBase": "bdc07ed9d0fce19f79db78a4a1015d67d4312597",
+  "version": "4.0.7",
+  "tag": "v4.0.7",
+  "developmentRevision": 64,
+  "liveContainerBase": "nightly 9d6ea09",
+  "sourceBase": "285f338b7713ce1f4c67addea9c60bf0121121c2",
+  "previousRelease": "v3.0.0",
   "ipaSha256": "",
-  "bundleVersionRetainedForCompatibility": true
+  "bundleVersionRetainedForCompatibility": true,
+  "ipaSize": 0
 }
