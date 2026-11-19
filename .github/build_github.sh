@@ -107,7 +107,10 @@ sign_builtin_plugins() {
   for dylib in LCGridLayout LCFloatingMenu; do
     target="Payload/LiveContainer.app/Frameworks/$dylib.dylib"
     [ -f "$target" ] || continue
-    ldid -S"$target"
+    # 注意 -S"" 与路径之间必须有空格：写成 -S"$target" 会被 ldid 当成
+    # 「用这个 dylib 当 entitlements 文件」，签名直接失败且不报错，
+    # 结果就是插件没签名、dlopen 当场返回 NULL。
+    ldid -S"" "$target"
   done
 }
 
