@@ -1,7 +1,6 @@
 import Foundation
 
 protocol LCAppModelDelegate {
-    @MainActor func ensureBundled32BitRuntime(for app: LCAppModel) async throws
     func closeNavigationView()
     func changeAppVisibility(app : LCAppModel)
     func jitLaunch(appName: String, classicMode: UInt) async
@@ -224,21 +223,10 @@ class LCAppModel: ObservableObject, Hashable {
     
     // You should let LCAppModel.runApp to decide whether to run in multitask mode, but you may override the multitask parameter if necessary
     func runApp(multitask: Bool? = nil, containerFolderName : String? = nil, bundleIdOverride : String? = nil, urlStr : String? = nil, forceJIT: Bool? = nil) async throws{
-        if let shortcut = appInfo as? StrataPhoneAppInfo {
-            try await StrataPhoneApps.shared.open(shortcut.entryID)
+        if isAppRunning {
             return
         }
-        let acquired = await MainActor.run { () -> Bool in
-            guard !self.isAppRunning else { return false }
-            self.isAppRunning = true
-            return true
-        }
-        guard acquired else { return }
-        defer { Task { await MainActor.run { self.isAppRunning = false } } }
-        if appInfo.is32bit {
-            guard let delegate else { throw "App library is not ready to prepare the 32-bit runtime.".loc }
-            try await delegate.ensureBundled32BitRuntime(for: self)
-        }
+        
         if uiContainers.isEmpty {
             let newName = NSUUID().uuidString
             let newContainer = LCContainer(folderName: newName, name: newName, isShared: uiIsShared)
@@ -257,24 +245,12 @@ class LCAppModel: ObservableObject, Hashable {
         let currentDataFolder = containerFolderName ?? uiSelectedContainer?.folderName
         
         let classicMode = appInfo.defaultClassicMode
-        let builtInJIT = LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue && (forceJIT ?? (appInfo.isJITNeeded || appInfo.is32bit))
-        let hostOptions = (LCUtils.appGroupUserDefault.string(forKey: "StrataHostJITApps") ?? "{}").data(using: .utf8).flatMap { try? JSONDecoder().decode([String: Bool].self, from: $0) } ?? [:]
-        let hostKey = "\(uiIsShared ? "shared" : "local"):\(appInfo.relativeBundlePath ?? bundleIdentifier)"
-        let hostJIT = builtInJIT && hostOptions[hostKey] == true && multitask != true && classicMode == 0
-        if builtInJIT && classicMode != 0 {
-            throw "Built-in JIT requires normal compatibility mode. Turn off Classic Mode for this app, then retry.".loc
-        }
-        let preferredMultitask = hostJIT ? false : (classicMode == 0 ? (multitask ?? (builtInJIT ? false : shouldLaunchInMultitaskMode)) : false)
-        // Keep the JIT target alive in a full-screen guest when normal presentation is requested.
-        let fullScreenJIT = builtInJIT && !hostJIT && !preferredMultitask
-        // Seamless switching: run each app in its own process, full screen, so switching brings its
-        // window to the front instead of relaunching Strata. Explicit in-process requests (HostJIT,
-        // Classic Mode, Request Game Mode = multitask false) keep the old path.
-        let seamless = (LCUtils.appGroupUserDefault.object(forKey: "StrataSeamlessSwitching") as? Bool ?? true)
-            && !hostJIT && classicMode == 0 && multitask == nil && !preferredMultitask
-            // The built-in SideStore lives inside Strata and can't run in a LiveProcess.
-            && bundleIdOverride == nil && !(appInfo is BuiltInSideStoreAppInfo)
-        let multitask = preferredMultitask || fullScreenJIT || seamless
+        let multitask = classicMode == 0 ? (multitask ?? shouldLaunchInMultitaskMode) : false
+        let builtInJIT = LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue
+        // Built-in JIT can only attach to another process, so this launch always takes
+        // the guest-scene path even when the app would normally run in-process.
+        var guestSceneLaunch = multitask
+        if #available(iOS 17.4, *), builtInJIT { guestSceneLaunch = true }
         
         if MultitaskManager.isMultitasking() || multitask,
            let currentDataFolder {
@@ -342,7 +318,7 @@ class LCAppModel: ObservableObject, Hashable {
                     if let url = launchURLComp.url {
                         await UIApplication.shared.open(url)
                     } else {
-                        throw "Unable to build URL from launchURLComp???".loc
+                        throw "Unable to build URL from launchURLComp???"
                     }
                     return
                 }
@@ -353,6 +329,14 @@ class LCAppModel: ObservableObject, Hashable {
             }
         }
         
+        await MainActor.run {
+            isAppRunning = true
+        }
+        defer {
+            Task { await MainActor.run {
+                isAppRunning = false
+            }}
+        }
         try await signApp(force: false)
         
         if let bundleIdOverride {
@@ -372,26 +356,23 @@ class LCAppModel: ObservableObject, Hashable {
 #if targetEnvironment(simulator)
         jitNeeded = false
 #endif
-        if jitNeeded && hostJIT {
-            guard let relative = appInfo.relativeBundlePath, let folder = uiSelectedContainer?.folderName else { throw "HostJIT needs a registered guest and data container.".loc }
-            let hostPairingURL = await LiveBoardBuiltInJIT.pairingURL
-            guard FileManager.default.fileExists(atPath: hostPairingURL.path) else { throw "Import a pairing file and prepare the device before testing HostJIT.".loc }
-            UserDefaults.standard.set(["app": relative, "container": folder, "created": Date().timeIntervalSince1970, "script": resolvedJITScript ?? LCUtils.base64EncodedUniversalJITScript()], forKey: "StrataHostJITRequest")
-            LCSharedUtils.launchToGuestApp(withClassicMode: classicMode)
-        } else if jitNeeded {
-            if multitask, #available(iOS 17.4, *) {
+        if jitNeeded {
+            if guestSceneLaunch && builtInJIT {
+                LCUtils.appGroupUserDefault.set(true, forKey: "LCBuiltInJITWait")
+            }
+            if guestSceneLaunch, #available(iOS 17.4, *) {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    LCUtils.launchMultitaskGuestApp(appInfo.displayName(), fullScreen: fullScreenJIT || seamless, waitForJIT: builtInJIT) { pidNumber, error in
+                    LCUtils.launchMultitaskGuestApp(appInfo.displayName()) { pidNumber, error in
                         if let error {
                             continuation.resume(throwing: error)
                             return
                         }
                         guard let pidNumber = pidNumber else {
-                            continuation.resume(throwing: "Failed to obtain PID from LiveProcess".loc)
+                            continuation.resume(throwing: "Failed to obtain PID from LiveProcess")
                             return
                         }
                         Task {
-                            if let scriptData = self.resolvedJITScript, !scriptData.isEmpty {
+                            if let scriptData = self.jitLaunchScriptJs, !scriptData.isEmpty {
                                 await self.delegate?.jitLaunch(withPID: pidNumber.intValue, withScript: scriptData, appName: self.appInfo.displayName())
                             } else {
                                 await self.delegate?.jitLaunch(withPID: pidNumber.intValue, withScript: nil, appName: self.appInfo.displayName())
@@ -402,13 +383,13 @@ class LCAppModel: ObservableObject, Hashable {
                 }
             } else {
                 // Non-multitask JIT flow remains unchanged
-                if let scriptData = resolvedJITScript, !scriptData.isEmpty {
+                if let scriptData = jitLaunchScriptJs, !scriptData.isEmpty {
                     await delegate?.jitLaunch(withScript: scriptData, appName: self.appInfo.displayName(), classicMode: classicMode)
                 } else {
                     await delegate?.jitLaunch(appName: self.appInfo.displayName(), classicMode: classicMode)
                 }
             }
-        } else if multitask, #available(iOS 16.0, *) {
+        } else if guestSceneLaunch, #available(iOS 16.0, *) {
             try await LCUtils.launchMultitaskGuestApp(appInfo.displayName())
         } else {
             if #available(iOS 26.0, *), FileManager.default.fileExists(atPath: "\(appInfo.bundlePath()!)/Frameworks/MetalANGLE.framework/MetalANGLE") {

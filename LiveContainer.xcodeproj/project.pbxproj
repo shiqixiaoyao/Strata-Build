@@ -7,30 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1708BEEF0000000000000001 /* LCFloatingMenu.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000002 /* LCFloatingMenu.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000101 /* LCOrbitAutomaticPiP.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000102 /* LCOrbitAutomaticPiP.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000201 /* LCOrbitCore.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000202 /* LCOrbitCore.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000301 /* LCOrbitEventBus.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000302 /* LCOrbitEventBus.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000401 /* LCOrbitGitHub.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000402 /* LCOrbitGitHub.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000501 /* LCOrbitGuestService.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000502 /* LCOrbitGuestService.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000601 /* LCOrbitHost.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000602 /* LCOrbitHost.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000701 /* LCOrbitHostSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000702 /* LCOrbitHostSettings.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000801 /* LCOrbitLog.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000802 /* LCOrbitLog.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000901 /* LCOrbitLogViewer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000902 /* LCOrbitLogViewer.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000A01 /* LCOrbitMultitask.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000A02 /* LCOrbitMultitask.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000B01 /* LCOrbitMultitaskUI.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000B02 /* LCOrbitMultitaskUI.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000C01 /* LCOrbitOverlayManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000C02 /* LCOrbitOverlayManager.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000D01 /* LCOrbitPluginUpdater.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000D02 /* LCOrbitPluginUpdater.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000E01 /* LCOrbitSharedTweaksViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000E02 /* LCOrbitSharedTweaksViewController.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000000F01 /* LCOrbitStorage.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000000F02 /* LCOrbitStorage.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000001001 /* LCOrbitTweakAudit.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000001002 /* LCOrbitTweakAudit.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000001101 /* LCOrbitTweakCenter.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000001102 /* LCOrbitTweakCenter.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000001201 /* LCOrbitTweakCenterViews.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000001202 /* LCOrbitTweakCenterViews.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000001301 /* LCOrbitTweakSync.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000001302 /* LCOrbitTweakSync.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		1708BEEF0000000000001401 /* LCOrbitUpdateRelease.m in Sources */ = {isa = PBXBuildFile; fileRef = 1708BEEF0000000000001402 /* LCOrbitUpdateRelease.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		A22000000000000000000001 /* StrataGuestControls.m in Sources */ = {isa = PBXBuildFile; fileRef = A22000000000000000000002 /* StrataGuestControls.m */; };
-		A23000000000000000000001 /* StrataGuestTextTranslation.m in Sources */ = {isa = PBXBuildFile; fileRef = A23000000000000000000002 /* StrataGuestTextTranslation.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
-		A20000000000000000000001 /* StrataProcessMemory.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* StrataProcessMemory.m */; };
 		173545AF2E2C7913001B3B4C /* SideStoreSupport.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 173545A82E2C7913001B3B4C /* SideStoreSupport.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		17413FBC2D9C0BAE00F3F928 /* LiveContainerSwiftUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 17413FB52D9C0BAE00F3F928 /* LiveContainerSwiftUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		174140902D9C0E8200F3F928 /* TweakLoader.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1741403A2D9C0D0000F3F928 /* TweakLoader.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -57,10 +33,6 @@
 		E16D95742E1CD2980068EB63 /* LCMachOUtils.m in Sources */ = {isa = PBXBuildFile; fileRef = E16D94DE2E1CC8200068EB63 /* LCMachOUtils.m */; };
 		E16D95752E1CD2B90068EB63 /* LiveContainerShared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E1292BD62DCA3B660065E12D /* LiveContainerShared.framework */; };
 		E1946AD83041BFF8005CBEDD /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E1946AD63041BFDD005CBEDD /* IOKit.framework */; };
-		A15000000000000000000010 /* StosSign_API in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000020 /* StosSign_API */; };
-		A15000000000000000000011 /* StosSign_Auth in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000021 /* StosSign_Auth */; };
-		A15000000000000000000012 /* StosSign_Anisette in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000022 /* StosSign_Anisette */; };
-		A15000000000000000000013 /* StosSign_Common in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000023 /* StosSign_Common */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -183,31 +155,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1708BEEF0000000000000002 /* LCFloatingMenu.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCFloatingMenu.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000102 /* LCOrbitAutomaticPiP.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitAutomaticPiP.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000202 /* LCOrbitCore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitCore.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000302 /* LCOrbitEventBus.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitEventBus.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000402 /* LCOrbitGitHub.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitGitHub.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000502 /* LCOrbitGuestService.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitGuestService.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000602 /* LCOrbitHost.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitHost.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000702 /* LCOrbitHostSettings.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitHostSettings.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000802 /* LCOrbitLog.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitLog.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000902 /* LCOrbitLogViewer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitLogViewer.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000A02 /* LCOrbitMultitask.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitMultitask.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000B02 /* LCOrbitMultitaskUI.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitMultitaskUI.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000C02 /* LCOrbitOverlayManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitOverlayManager.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000D02 /* LCOrbitPluginUpdater.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitPluginUpdater.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000E02 /* LCOrbitSharedTweaksViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitSharedTweaksViewController.m; sourceTree = "<group>"; };
-		1708BEEF0000000000000F02 /* LCOrbitStorage.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitStorage.m; sourceTree = "<group>"; };
-		1708BEEF0000000000001002 /* LCOrbitTweakAudit.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakAudit.m; sourceTree = "<group>"; };
-		1708BEEF0000000000001102 /* LCOrbitTweakCenter.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakCenter.m; sourceTree = "<group>"; };
-		1708BEEF0000000000001202 /* LCOrbitTweakCenterViews.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakCenterViews.m; sourceTree = "<group>"; };
-		1708BEEF0000000000001302 /* LCOrbitTweakSync.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakSync.m; sourceTree = "<group>"; };
-		1708BEEF0000000000001402 /* LCOrbitUpdateRelease.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitUpdateRelease.m; sourceTree = "<group>"; };
-		A22000000000000000000002 /* StrataGuestControls.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = StrataGuestControls.m; sourceTree = "<group>"; };
-		A23000000000000000000002 /* StrataGuestTextTranslation.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = StrataGuestTextTranslation.m; sourceTree = "<group>"; };
-		A20000000000000000000002 /* StrataProcessMemory.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = StrataProcessMemory.m; sourceTree = "<group>"; };
-		A20000000000000000000003 /* StrataProcessMemory.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = StrataProcessMemory.h; sourceTree = "<group>"; };
 		172978E8302EAF07004A3E78 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		172CA8542D9D721700CF6989 /* dyld_bypass_validation.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = dyld_bypass_validation.m; sourceTree = "<group>"; };
 		172CA8552D9D721700CF6989 /* FoundationPrivate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FoundationPrivate.h; sourceTree = "<group>"; };
@@ -372,6 +319,7 @@
 		174140162D9C0C1B00F3F928 /* TweakLoader */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (174140F52D9C1C9B00F3F928 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = TweakLoader; sourceTree = "<group>"; };
 		174140552D9C0D6D00F3F928 /* ZSign */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = ZSign; sourceTree = "<group>"; };
 		174140AE2D9C0F4100F3F928 /* TestJITLess */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = TestJITLess; sourceTree = "<group>"; };
+		1768BBF030A9B61D0037D5C8 /* LivePlugInSupport */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = LivePlugInSupport; sourceTree = "<group>"; };
 		17780D3B2E1C02420077E636 /* litehook */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (17780E512E1C039D0077E636 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = litehook; sourceTree = "<group>"; };
 		17B0F8452DE16FE4008110EA /* xcconfigs */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = xcconfigs; sourceTree = "<group>"; };
 		17CAE6182F230449008B1977 /* LaunchAppExtension */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (17CAE6252F230449008B1977 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = LaunchAppExtension; sourceTree = "<group>"; };
@@ -394,10 +342,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A15000000000000000000013 /* StosSign_Common in Frameworks */,
-				A15000000000000000000012 /* StosSign_Anisette in Frameworks */,
-				A15000000000000000000011 /* StosSign_Auth in Frameworks */,
-				A15000000000000000000010 /* StosSign_API in Frameworks */,
 				E1946AD83041BFF8005CBEDD /* IOKit.framework in Frameworks */,
 				E16D95752E1CD2B90068EB63 /* LiveContainerShared.framework in Frameworks */,
 				174140D62D9C176F00F3F928 /* libarchive.tbd in Frameworks */,
@@ -470,6 +414,7 @@
 		172CA85F2D9D721700CF6989 /* LiveContainer */ = {
 			isa = PBXGroup;
 			children = (
+				1768BBF030A9B61D0037D5C8 /* LivePlugInSupport */,
 				E16D95762E1CD49E0068EB63 /* LCMachOUtils.h */,
 				E1292C032DCA3C160065E12D /* main.c */,
 				E1292C1A2DCA48F00065E12D /* Tweaks */,
@@ -482,10 +427,6 @@
 				172CA8582D9D721700CF6989 /* Localization.h */,
 				172CA8592D9D721700CF6989 /* Localization.m */,
 				172CA85A2D9D721700CF6989 /* LCBootstrap.m */,
-				A20000000000000000000002 /* StrataProcessMemory.m */,
-				A22000000000000000000002 /* StrataGuestControls.m */,
-				A23000000000000000000002 /* StrataGuestTextTranslation.m */,
-				A20000000000000000000003 /* StrataProcessMemory.h */,
 				172CA85C2D9D721700CF6989 /* UIKitPrivate.h */,
 				172CA85D2D9D721700CF6989 /* utils.h */,
 				172CA85E2D9D721700CF6989 /* utils.m */,
@@ -516,7 +457,6 @@
 				172CA85F2D9D721700CF6989 /* LiveContainer */,
 				17413FB62D9C0BAE00F3F928 /* LiveContainerSwiftUI */,
 				174140162D9C0C1B00F3F928 /* TweakLoader */,
-				1708BEEF000000000000000003 /* Orbit */,
 				174140552D9C0D6D00F3F928 /* ZSign */,
 				174140AE2D9C0F4100F3F928 /* TestJITLess */,
 				E1292AE72DCA3A660065E12D /* LiveProcess */,
@@ -544,34 +484,6 @@
 				17E23DDF2F443A9300C55733 /* ShareExtension.appex */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		1708BEEF000000000000000003 /* Orbit */ = {
-			isa = PBXGroup;
-			children = (
-		1708BEEF0000000000000002 /* LCFloatingMenu.m */,
-		1708BEEF0000000000000102 /* LCOrbitAutomaticPiP.m */,
-		1708BEEF0000000000000202 /* LCOrbitCore.m */,
-		1708BEEF0000000000000302 /* LCOrbitEventBus.m */,
-		1708BEEF0000000000000402 /* LCOrbitGitHub.m */,
-		1708BEEF0000000000000502 /* LCOrbitGuestService.m */,
-		1708BEEF0000000000000602 /* LCOrbitHost.m */,
-		1708BEEF0000000000000702 /* LCOrbitHostSettings.m */,
-		1708BEEF0000000000000802 /* LCOrbitLog.m */,
-		1708BEEF0000000000000902 /* LCOrbitLogViewer.m */,
-		1708BEEF0000000000000A02 /* LCOrbitMultitask.m */,
-		1708BEEF0000000000000B02 /* LCOrbitMultitaskUI.m */,
-		1708BEEF0000000000000C02 /* LCOrbitOverlayManager.m */,
-		1708BEEF0000000000000D02 /* LCOrbitPluginUpdater.m */,
-		1708BEEF0000000000000E02 /* LCOrbitSharedTweaksViewController.m */,
-		1708BEEF0000000000000F02 /* LCOrbitStorage.m */,
-		1708BEEF0000000000001002 /* LCOrbitTweakAudit.m */,
-		1708BEEF0000000000001102 /* LCOrbitTweakCenter.m */,
-		1708BEEF0000000000001202 /* LCOrbitTweakCenterViews.m */,
-		1708BEEF0000000000001302 /* LCOrbitTweakSync.m */,
-		1708BEEF0000000000001402 /* LCOrbitUpdateRelease.m */,
-			);
-			path = Orbit;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -664,10 +576,6 @@
 			);
 			name = LiveContainerSwiftUI;
 			packageProductDependencies = (
-				A15000000000000000000023 /* StosSign_Common */,
-				A15000000000000000000022 /* StosSign_Anisette */,
-				A15000000000000000000021 /* StosSign_Auth */,
-				A15000000000000000000020 /* StosSign_API */,
 			);
 			productName = LiveContainerSwiftUI;
 			productReference = 17413FB52D9C0BAE00F3F928 /* LiveContainerSwiftUI.framework */;
@@ -847,6 +755,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				1768BBF030A9B61D0037D5C8 /* LivePlugInSupport */,
 				E1292C1A2DCA48F00065E12D /* Tweaks */,
 			);
 			name = LiveContainerShared;
@@ -947,7 +856,6 @@
 			);
 			mainGroup = 17DCE9942C7067EC00731D42;
 			packageReferences = (
-				A15000000000000000000000 /* StosSign */,
 			);
 			preferredProjectObjectVersion = 56;
 			productRefGroup = 17DCE99E2C7067EC00731D42 /* Products */;
@@ -1037,7 +945,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\nINFO_PLIST=\"${TARGET_BUILD_DIR}\"/\"${INFOPLIST_PATH}\"\n\n# Get current Git branch and commit hash\nCONFIG_BRANCH=$(git rev-parse --abbrev-ref HEAD)\nCONFIG_COMMIT=$(git log -1 --format=%h)\n\n# Combine values into a version info string\nLCVersionInfo=\"$CONFIGURATION ($CONFIG_BRANCH/$CONFIG_COMMIT)\"\n\n/usr/libexec/PlistBuddy -c \"Add :LCVersionInfo string $LCVersionInfo\" \"${INFO_PLIST}\"\ncp -n -r \"$SRCROOT\"/Resources/*.lproj \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\necho 1\nif [ \"$PLATFORM_NAME\" = \"iphoneos\" ]; then\n  python3 \"$SRCROOT/Scripts/embed-jit-helper.py\" \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\nfi\n";
+			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\nINFO_PLIST=\"${TARGET_BUILD_DIR}\"/\"${INFOPLIST_PATH}\"\n\n# Get current Git branch and commit hash\nCONFIG_BRANCH=$(git rev-parse --abbrev-ref HEAD)\nCONFIG_COMMIT=$(git log -1 --format=%h)\n\n# Combine values into a version info string\nLCVersionInfo=\"$CONFIGURATION ($CONFIG_BRANCH/$CONFIG_COMMIT)\"\n\n/usr/libexec/PlistBuddy -c \"Add :LCVersionInfo string $LCVersionInfo\" \"${INFO_PLIST}\"\ncp -n -r \"$SRCROOT\"/Resources/*.lproj \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\necho 1\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1060,27 +968,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1708BEEF0000000000000001 /* LCFloatingMenu.m in Sources */,
-				1708BEEF0000000000000101 /* LCOrbitAutomaticPiP.m in Sources */,
-				1708BEEF0000000000000201 /* LCOrbitCore.m in Sources */,
-				1708BEEF0000000000000301 /* LCOrbitEventBus.m in Sources */,
-				1708BEEF0000000000000401 /* LCOrbitGitHub.m in Sources */,
-				1708BEEF0000000000000501 /* LCOrbitGuestService.m in Sources */,
-				1708BEEF0000000000000601 /* LCOrbitHost.m in Sources */,
-				1708BEEF0000000000000701 /* LCOrbitHostSettings.m in Sources */,
-				1708BEEF0000000000000801 /* LCOrbitLog.m in Sources */,
-				1708BEEF0000000000000901 /* LCOrbitLogViewer.m in Sources */,
-				1708BEEF0000000000000A01 /* LCOrbitMultitask.m in Sources */,
-				1708BEEF0000000000000B01 /* LCOrbitMultitaskUI.m in Sources */,
-				1708BEEF0000000000000C01 /* LCOrbitOverlayManager.m in Sources */,
-				1708BEEF0000000000000D01 /* LCOrbitPluginUpdater.m in Sources */,
-				1708BEEF0000000000000E01 /* LCOrbitSharedTweaksViewController.m in Sources */,
-				1708BEEF0000000000000F01 /* LCOrbitStorage.m in Sources */,
-				1708BEEF0000000000001001 /* LCOrbitTweakAudit.m in Sources */,
-				1708BEEF0000000000001101 /* LCOrbitTweakCenter.m in Sources */,
-				1708BEEF0000000000001201 /* LCOrbitTweakCenterViews.m in Sources */,
-				1708BEEF0000000000001301 /* LCOrbitTweakSync.m in Sources */,
-				1708BEEF0000000000001401 /* LCOrbitUpdateRelease.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1136,9 +1023,6 @@
 				E16D95742E1CD2980068EB63 /* LCMachOUtils.m in Sources */,
 				E1292C082DCA434F0065E12D /* LCSharedUtils.m in Sources */,
 				E1292C0B2DCA43560065E12D /* LCBootstrap.m in Sources */,
-				A20000000000000000000001 /* StrataProcessMemory.m in Sources */,
-				A22000000000000000000001 /* StrataGuestControls.m in Sources */,
-				A23000000000000000000001 /* StrataGuestTextTranslation.m in Sources */,
 				E1292C0A2DCA43540065E12D /* utils.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1192,16 +1076,6 @@
 			targetProxy = E1292BE92DCA3B670065E12D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin XCLocalSwiftPackageReference section */
-        A15000000000000000000000 /* StosSign */ = {isa = XCLocalSwiftPackageReference; relativePath = Vendor/StosSign; };
-/* End XCLocalSwiftPackageReference section */
-/* Begin XCSwiftPackageProductDependency section */
-		A15000000000000000000020 /* StosSign_API */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000; productName = StosSign_API; };
-		A15000000000000000000021 /* StosSign_Auth */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000; productName = StosSign_Auth; };
-		A15000000000000000000022 /* StosSign_Anisette */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000; productName = StosSign_Anisette; };
-		A15000000000000000000023 /* StosSign_Common */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000; productName = StosSign_Common; };
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		173545B12E2C7913001B3B4C /* Debug */ = {
@@ -1818,14 +1692,14 @@
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ShareExtension;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 3.7.11;
-				OTHER_LDFLAGS = "$(inherited)";
+				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1856,14 +1730,14 @@
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ShareExtension;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 3.7.11;
-				OTHER_LDFLAGS = "$(inherited)";
+				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

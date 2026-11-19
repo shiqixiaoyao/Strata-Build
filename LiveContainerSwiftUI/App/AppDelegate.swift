@@ -3,20 +3,8 @@ import SwiftUI
 import Intents
 
 @objc class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        if #available(iOS 16.0, *), MultitaskDockManager.immersiveOrientationActive { return .all }
-        return LiveBoardOrientation.mask
-    }
-
         
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? ) -> Bool {
-        if LCUtils.appGroupUserDefault.object(forKey: "LCJITEnablerType") == nil {
-            LCUtils.appGroupUserDefault.set(JITEnablerType.BuiltIn.rawValue, forKey: "LCJITEnablerType")
-        }
-        StrataAutoRefresh.shared.register()
-        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in StrataAutoRefresh.shared.checkDue() }
-        }
         application.shortcutItems = nil
         UserDefaults.standard.removeObject(forKey: "LCNeedToAcquireJIT")
         

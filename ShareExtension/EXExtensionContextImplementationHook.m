@@ -14,6 +14,8 @@ static void hook__willPerformHostCallback(NSExtensionContext* self, SEL _cmd, id
     NSExtensionItem *item = self.inputItems.firstObject;
     NSDictionary *launchOptions = item.userInfo;
     if ([launchOptions[@"strataJIT"] boolValue]) {
+        // The JIT helper runs headless: hand the request straight to the worker and
+        // never build a share sheet for it.
         Class worker = NSClassFromString(@"StrataJITRequestHandler");
         if ([worker respondsToSelector:NSSelectorFromString(@"begin:")]) {
             [worker performSelector:NSSelectorFromString(@"begin:") withObject:self];

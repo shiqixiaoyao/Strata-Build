@@ -131,7 +131,7 @@ final class LCAppBannerRootView: UIView {
         darkModeIcon: Bool,
         traitCollection: UITraitCollection
     ) {
-        let icon = LiveBoardIconStore.image(model, dark: darkModeIcon) ?? appInfo.iconIsDarkIcon(darkModeIcon) ?? UIImage()
+        let icon = appInfo.iconIsDarkIcon(darkModeIcon) ?? UIImage()
         let mainColor = Self.extractMainHueColor(appInfo: appInfo, icon: icon, darkModeIcon: darkModeIcon)
         let accentColor = dynamicColors ? mainColor : (UIColor(named: "FontColor") ?? .systemBlue)
         let textColor = Self.readableTextColor(for: accentColor, traitCollection: traitCollection)

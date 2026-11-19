@@ -11,16 +11,9 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic) UIView* contentView;
 
 @property(nonatomic) BOOL isMaximized;
-@property(nonatomic) BOOL immersiveRequested;
-@property(nonatomic) BOOL immersivePresented;
-- (void)presentImmersiveFrom:(UIViewController *)presenter;
 @property(nonatomic) CGFloat scaleRatio;
 - (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC;
-- (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC fullScreen:(BOOL)fullScreen;
-- (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC fullScreen:(BOOL)fullScreen jitToken:(NSString*)jitToken;
-- (void)closeWindow;
 - (void)minimizeWindow;
-- (void)dismissImmersiveAnimated:(BOOL)animated completion:(void (^)(void))completion;
 - (void)minimizeWindowPiP;
 - (void)unminimizeWindowPiP;
 - (void)updateVerticalConstraints;

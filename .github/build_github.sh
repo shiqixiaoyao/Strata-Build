@@ -6,26 +6,52 @@ brew install ldid
 # move lc to working folder
 mv "$archive_path.xcarchive/Products/Applications" Payload
 
+# --- Built-in JIT helper ----------------------------------------------------
+# A second extension process is the only way to hold a debugger connection: a
+# process cannot attach a debugger to itself. The helper is the share extension
+# binary with its own Info.plist, so both processes share the same worker code.
+if [ -d "Payload/LiveContainer.app/PlugIns/ShareExtension.appex" ]; then
+  rm -rf "Payload/LiveContainer.app/PlugIns/JITHelper.appex"
+  cp -R "Payload/LiveContainer.app/PlugIns/ShareExtension.appex" "Payload/LiveContainer.app/PlugIns/JITHelper.appex"
+  python3 - "Payload/LiveContainer.app" <<'PY'
+import plistlib, sys
+from pathlib import Path
+app = Path(sys.argv[1])
+target = app / "PlugIns/JITHelper.appex"
+info = plistlib.loads((target / "Info.plist").read_bytes())
+main = plistlib.loads((app / "Info.plist").read_bytes())
+info["CFBundleIdentifier"] = main["CFBundleIdentifier"] + ".JITHelper"
+info["CFBundleDisplayName"] = "JIT Helper"
+info["NSLocalNetworkUsageDescription"] = "Connect to your local development tunnel to enable JIT."
+info["NSExtension"] = {
+    "NSExtensionPointIdentifier": "com.apple.ar.viewer",
+    "NSExtensionPrincipalClass": "StrataJITRequestHandler",
+    "NSExtensionAttributes": {"NSExtensionActivationRule": "FALSEPREDICATE"},
+    "NSExtensionContextClass": "NSExtensionContext",
+    "NSExtensionContextHostClass": "NSExtensionContext",
+}
+(target / "Info.plist").write_bytes(plistlib.dumps(info))
+print("JITHelper assembled")
+PY
+fi
+
 # --- App Group entitlements -------------------------------------------------
-# SideStore decides which App Group to register/assign by reading the target
-# bundle's entitlements. A payload that declares no
-# com.apple.security.application-groups makes it silently skip that step, the
-# profile then carries no group, and anything that needs the shared container
-# (the built-in store's Core Data database) fails on launch with
-# "App Group Container Inaccessible". Upstream releases sign the payload here;
-# reproduce that so SideStore can hand us a profile holding the group.
+# SideStore 用目标包的 entitlements 里有没有 com.apple.security.application-groups
+# 来决定要不要向 Apple 注册并分配 App Group。没有声明就整步跳过，签出来的描述文件
+# 不带共享容器，内置商店一启动就报「无法访问 App Group 容器」。这里给主程序和每个
+# 扩展都补上，和上游发布包的签法保持一致。
 ADHOC_APP_ENTITLEMENTS=.github/sidelc/LiveContainer_adhoc.xml
 
 write_appex_entitlements() {
-  bundle_id="$1"
-  out="$2"
-  cat > "$out" <<PLIST
+  appex_bundle_id="$1"
+  appex_out="$2"
+  cat > "$appex_out" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>application-identifier</key>
-	<string>AAAAA11111.${bundle_id}</string>
+	<string>AAAAA11111.${appex_bundle_id}</string>
 	<key>com.apple.developer.team-identifier</key>
 	<string>AAAAA11111</string>
 	<key>com.apple.security.application-groups</key>
@@ -39,48 +65,23 @@ write_appex_entitlements() {
 PLIST
 }
 
-if [ -f "$ADHOC_APP_ENTITLEMENTS" ]; then
+sign_app_groups() {
+  [ -f "$ADHOC_APP_ENTITLEMENTS" ] || return 0
   ldid -S"$ADHOC_APP_ENTITLEMENTS" Payload/LiveContainer.app/LiveContainer
-
-  # Every embedded extension runs in its own process, so each one needs the
-  # group declared on its own executable for the store to assign one to it.
   for appex in Payload/LiveContainer.app/PlugIns/*.appex; do
-    appex_name=$(basename "$appex" .appex)
-    # The executable name is not always the bundle name: JITHelper.appex ships
-    # ShareExtension, so guessing from the folder name silently skips it.
+    [ -d "$appex" ] || continue
+    # 扩展的可执行文件名不一定等于包名（JITHelper.appex 里叫 ShareExtension），必须问 Info.plist
     exe_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$appex/Info.plist" 2>/dev/null)
-    [ -n "$exe_name" ] || exe_name="$appex_name"
-    exe="$appex/$exe_name"
-    [ -f "$exe" ] || continue
-    bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist" 2>/dev/null || true)
-    [ -n "$bundle_id" ] || bundle_id="com.kdt.livecontainer.$appex_name"
-    write_appex_entitlements "$bundle_id" "/tmp/ent_$appex_name.plist"
-    ldid -S"/tmp/ent_$appex_name.plist" "$exe"
+    [ -n "$exe_name" ] || exe_name=$(basename "$appex" .appex)
+    [ -f "$appex/$exe_name" ] || continue
+    appex_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist" 2>/dev/null)
+    [ -n "$appex_bundle_id" ] || appex_bundle_id="com.kdt.livecontainer.$exe_name"
+    write_appex_entitlements "$appex_bundle_id" "/tmp/ent_$exe_name.plist"
+    ldid -S"/tmp/ent_$exe_name.plist" "$appex/$exe_name"
   done
-fi
-
-# 扩展（.appex）与 SideStoreSupport.framework 都是独立 bundle：进程里 Bundle.main 指向它们自己，
-# 而这些 bundle 里没有任何 .lproj，于是扩展界面只能显示 key 原文（String.loc 的 en 兜底还会踩空）。
-# 把主 App 编译出的语言表按语言原样复制进去：中文系统走 zh-Hans，英文系统走 en。
-# 注意必须按语言一一对应，早先「两种语言都塞中文表」会让英文系统显示中文。
-APP_BUNDLE=./Payload/LiveContainer.app
-
-copy_lproj() {
-  dest="$1"
-  for loc in zh-Hans en; do
-    src="$APP_BUNDLE/$loc.lproj"
-    [ -d "$src" ] || continue
-    mkdir -p "$dest/$loc.lproj"
-    [ -f "$src/Localizable.strings" ] && cp "$src/Localizable.strings" "$dest/$loc.lproj/"
-    [ -f "$src/Localizable.stringsdict" ] && cp "$src/Localizable.stringsdict" "$dest/$loc.lproj/"
-  done
-  true
 }
 
-for bundle in "$APP_BUNDLE"/PlugIns/*.appex "$APP_BUNDLE"/Frameworks/SideStoreSupport.framework; do
-  [ -d "$bundle" ] || continue
-  copy_lproj "$bundle"
-done
+sign_app_groups
 
 # temporarily move sidestore support framrwork to tmp before zip
 mkdir tmp
@@ -128,12 +129,6 @@ rm ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 mv ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore.dylib ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 ldid -S"" ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 cp ./.github/sidelc/LCAppInfo.plist ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/
-
-# SideStore 访客进程里 NSBundle.mainBundle 会被换成 SideStoreApp.framework，
-# 而这个 framework 本身没有 .lproj，所以所有本地化查询都会回落到英文原文。
-# 同样按语言把主 bundle 的表搬过来。
-SIDESTORE_FW=./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework
-copy_lproj "$SIDESTORE_FW"
 
 # copy intents
 cp ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/Intents.intentdefinition ./Payload/LiveContainer.app/

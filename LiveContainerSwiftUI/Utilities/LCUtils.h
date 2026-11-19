@@ -25,26 +25,16 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 @end
 
 @interface LCUtils : NSObject
-+ (NSDictionary *)strataPhoneApplications;
-+ (void)strataOpenPhoneApplication:(NSString *)identifier completion:(void (^)(NSString * _Nullable error))completion;
-+ (UIImage * _Nullable)strataPhoneApplicationIcon:(NSString *)identifier;
-+ (void)strataRefreshSideStore:(void (^)(NSString *error))completion;
-+ (void)strataCancelSideStoreRefresh;
+
+// Built-in JIT helper: a second extension process owns the debugger connection,
+// because a process cannot attach a debugger to itself.
 + (BOOL)strataCanDebug;
-+ (NSDictionary *)strataMemoryStatus;
-+ (void)strataToggleAppSwitcher;
-+ (void)strataSetSwitcherLiveProvider:(UIView * _Nullable (^)(NSString *key))live front:(NSString * _Nullable (^)(void))front;
 + (NSObject *)strataStartJITHelper:(NSDictionary *)payload error:(NSError **)error;
 + (void)strataStopJITHelper:(NSObject *)helper;
 
 + (void)validateJITLessSetupWithCompletionHandler:(void (^)(BOOL success, NSError *error))completionHandler;
 + (NSURL *)archiveIPAWithBundleName:(NSString*)newBundleName includingExtraInfoDict:(NSDictionary *)extraInfoDict error:(NSError **)error;
 + (NSData *)certificateData;
-+ (NSDictionary *)strataCertificateMetadata:(NSData *)data password:(NSString *)password;
-+ (void)launchMultitaskGuestApp:(NSString *)displayName fullScreen:(BOOL)fullScreen completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler API_AVAILABLE(ios(16.0));
-+ (void)launchMultitaskGuestApp:(NSString *)displayName fullScreen:(BOOL)fullScreen waitForJIT:(BOOL)waitForJIT completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler API_AVAILABLE(ios(16.0));
-+ (void)strataShowJITFailure:(NSString *)message forPID:(int)pid API_AVAILABLE(ios(17.4));
-+ (void)strataPresentFullscreenGuestWithPID:(int)pid API_AVAILABLE(ios(17.4));
 + (void)launchMultitaskGuestApp:(NSString *)displayName completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler API_AVAILABLE(ios(16.0));
 
 

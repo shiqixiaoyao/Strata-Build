@@ -55,7 +55,7 @@ struct ShareExtensionRootView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
-            .navigationTitle(Text("Strata"))
+            .navigationTitle(Text("LiveContainer"))
             .navigationBarTitleDisplayMode(.inline)
         }
     }

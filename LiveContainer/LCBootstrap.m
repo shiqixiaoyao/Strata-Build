@@ -1,7 +1,3 @@
-#import "StrataRuntimePath.h"
-#import <AVFoundation/AVFoundation.h>
-#import "StrataProcessMemory.h"
-#import "StrataGuestControls.h"
 #import "FoundationPrivate.h"
 #import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
@@ -43,7 +39,7 @@ bool sideStoreExist = false;
     return lcUserDefaults;
 }
 + (instancetype)lcSharedDefaults {
-    if(!lcUserDefaults) {
+    if(!lcSharedDefaults) {
         lcSharedDefaults = [[NSUserDefaults alloc] initWithSuiteName: [LCSharedUtils appGroupID]];
     }
     return lcSharedDefaults;
@@ -54,8 +50,9 @@ bool sideStoreExist = false;
 + (NSString *)lcAppUrlScheme {
     return lcAppUrlScheme;
 }
-// +lcMainBundle 只有一份实现，在 Localization.m：它读上面的 lcMainBundle 全局，
-// 为 nil 时（扩展进程）按 .appex 结构自己推导宿主 App bundle。
++ (NSBundle *)lcMainBundle {
+    return lcMainBundle;
+}
 + (NSDictionary *)guestAppInfo {
     return guestAppInfo;
 }
@@ -251,11 +248,10 @@ static void *getAppEntryPoint(void *handle) {
     return (void *)header + entryoff;
 }
 
-NSString *LCPrepareGuestExtension(NSDictionary *request) {
-    // Unlike an app launch, this process already has a live system extension
-    // context. Only prepare the guest environment and load its request handler.
+NSString *LCRunGuestExtension(NSDictionary *request, int argc, char *argv[], char *envp[], char *apple[]) {
     lcMainBundle = NSBundle.mainBundle;
     lcUserDefaults = NSUserDefaults.standardUserDefaults;
+    [LCSharedUtils certificatePassword];
     isLiveProcess = true;
     lcAppUrlScheme = @"liveprocess";
     lcSharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:LCSharedUtils.appGroupID];
@@ -275,14 +271,12 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
         [accessedURLs addObject:url];
     }
     NSString *bundlePath = request[@"bundlePath"];
-    NSString *appPath = request[@"appBundlePath"];
     NSString *homePath = request[@"containerPath"];
     NSString *lcHomePath = request[@"lcHomePath"];
 
     NSBundle *bundle = [NSBundle bundleWithPath:bundlePath];
 
     lcGuestAppId = bundle.bundleIdentifier;
-    StrataStartMemoryOverlaySampler(LCSharedUtils.appGroupID, @"helper", bundle.bundleIdentifier ?: @"Helper");
     NSString *originalHome = NSHomeDirectory();
     setenv("LP_HOME_PATH", originalHome.fileSystemRepresentation, 1);
     setenv("LC_HOME_PATH", lcHomePath.fileSystemRepresentation, 1);
@@ -297,8 +291,16 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
     NUDGuestHooksInit();
     NSFMGuestExtensionHooksInit(request[@"parentContainerPath"]);
     NSURLSCGuestHooksInit();
+    GuestExtensionHooksInit();
 
-    if (checkJITEnabled()) init_bypassDyldLibValidation();
+    if (!LCSharedUtils.certificatePassword && !isSideStore) {
+#if !TARGET_OS_SIMULATOR
+        if(@available(iOS 26.0 ,*))  {
+            return @"JITLess mode is required since iOS 26. Please set it up in settings. \nPlease go to LiveContainer settings -> tap \"Import Certificate from SideStore\" / \"Import Certificate\"";
+        }
+#endif
+        if (checkJITEnabled()) init_bypassDyldLibValidation();
+    }
     DyldHooksInit(false, true, 0);
     appMainImageIndex = _dyld_image_count();
     __block void *handle = NULL;
@@ -317,6 +319,13 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
         return error ? @(error) : @"Unable to load the guest extension";
     }
     appExecutableHandle = handle;
+    
+    appMain = getAppEntryPoint(handle);
+    if (!appMain) {
+        return @"Could not find the main entry point";
+    }
+    appMain(argc, argv, envp);
+    
     return nil;
 }
 
@@ -325,10 +334,30 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     if([[lcUserDefaults objectForKey:@"LCWaitForDebugger"] boolValue]) {
         sleep(100);
     }
+    // Built-in JIT: the helper process is still mounting the developer disk image and
+    // attaching, which takes far longer than the 1s window below. The flag lives in the
+    // app group because this code runs inside LiveProcess.appex, where the standard
+    // defaults belong to the extension's own domain.
+    BOOL builtInJITRequested = [lcSharedDefaults objectForKey:@"LCBuiltInJITWait"] != nil;
+    if (builtInJITRequested) {
+        NSDate *builtInJITDeadline = [NSDate dateWithTimeIntervalSinceNow:240];
+        while (!checkJITEnabled() && [lcSharedDefaults objectForKey:@"LCBuiltInJITWait"] && [builtInJITDeadline timeIntervalSinceNow] > 0) {
+            usleep(100 * 1000);
+        }
+        [lcSharedDefaults removeObjectForKey:@"LCBuiltInJITWait"];
+        if (!checkJITEnabled()) {
+            return @"Built-in JIT did not attach. Check the pairing file, LocalDevVPN and Wi-Fi, then try again.";
+        }
+    }
     if (!LCSharedUtils.certificatePassword && !isSideStore) {
 #if !TARGET_OS_SIMULATOR
         if(@available(iOS 26.0 ,*))  {
-            return @"JITLess mode is required since iOS 26. Please set it up in settings. \nPlease go to LiveContainer settings -> tap \"Import Certificate from SideStore\" / \"Import Certificate\"";
+            // iOS 26 removed script-less JIT, but a guest running in its own process can
+            // still hold a real debugger session from the built-in helper, so the JITLess
+            // requirement only applies when nothing is going to attach.
+            if (!builtInJITRequested && !checkJITEnabled()) {
+                return @"JITLess mode is required since iOS 26. Please set it up in settings. \nPlease go to LiveContainer settings -> tap \"Import Certificate from SideStore\" / \"Import Certificate\"";
+            }
         }
 #endif
         // First of all, let's check if we have JIT
@@ -371,16 +400,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         return @"App bundle not found! Unable to read LCAppInfo.plist.";
     }
     
-    NSString *hudKey = [NSString stringWithFormat:@"%@:%@", isSharedBundle ? @"shared" : @"local", selectedApp ?: @"builtin:sidestore"];
-    NSMutableDictionary *hudRequests = [[lcSharedDefaults dictionaryForKey:@"StrataMetalHUDApps"] mutableCopy] ?: [NSMutableDictionary new];
-    BOOL strataMetalHUD = [hudRequests[hudKey] boolValue];
-    [hudRequests removeObjectForKey:hudKey];
-    [lcSharedDefaults setObject:hudRequests forKey:@"StrataMetalHUDApps"];
-    if (strataMetalHUD) setenv("MTL_HUD_ENABLED", "1", 1);
-
-    // 悬浮菜单（Orbit/LCFloatingMenu）已编进 TweakLoader，默认不启动，由设置里的开关决定
-    if ([lcSharedDefaults boolForKey:@"StrataFloatingMenuEnabled"]) setenv("LC_ORBIT_ENABLED", "1", 1);
-
     if([guestAppInfo[@"doUseLCBundleId"] boolValue] ) {
         NSMutableDictionary* infoPlist = [NSMutableDictionary dictionaryWithContentsOfFile:[NSString stringWithFormat:@"%@/Info.plist", bundlePath]];
         CFErrorRef error = NULL;
@@ -593,7 +612,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     // hook NSUserDefault before running libraries' initializers
     NUDGuestHooksInit();
-    if (!isLiveProcess && [guestAppInfo[@"helperProcessesSupport"] boolValue]) {
+    if ([guestAppInfo[@"helperProcessesSupport"] boolValue]) {
         NSExtensionGuestHooksInit(appBundle.bundleURL, [NSURL fileURLWithPath:newHomePath isDirectory:YES]);
     }
     if(!isSideStore) {
@@ -634,10 +653,10 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
             *path = oldPath;
             return appError;
         }
-        if (![selected32BitLayer.lastPathComponent isEqualToString:selected32BitLayer] || [selected32BitLayer containsString:@"\\"] || ![selected32BitLayer.pathExtension.lowercaseString isEqualToString:@"app"]) return @"Invalid 32-bit runtime selection. Select an installed runtime in app settings.";
-        bool runtimeIsShared = false;
-        NSBundle *selected32bitLayerBundle = StrataFind32BitRuntime(selected32BitLayer, [NSURL fileURLWithPath:docPath], [LCSharedUtils appGroupPath]);
-        if (selected32bitLayerBundle && (!selected32bitLayerBundle.executablePath || ![fm isReadableFileAtPath:selected32bitLayerBundle.executablePath])) selected32bitLayerBundle = nil;
+        NSBundle *selected32bitLayerBundle = [NSBundle bundleWithPath:[NSString stringWithFormat:@"%@/Applications/%@", docPath, selected32BitLayer]];
+        if(!selected32bitLayerBundle) {
+            selected32bitLayerBundle = [NSBundle bundleWithPath:[NSString stringWithFormat:@"%@/Applications/%@", appGroupFolder.path, selected32BitLayer]];
+        }
         if(!selected32bitLayerBundle) {
             appError = @"The specified 32-bit emulator app is not found";
             NSLog(@"[LCBootstrap] %@", appError);
@@ -705,26 +724,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     // Fix dynamic properties of some apps
     [NSUserDefaults performSelector:@selector(initialize)];
-    if (strataMetalHUD) {
-        NSMutableDictionary *hudArguments = [[NSUserDefaults.standardUserDefaults volatileDomainForName:NSArgumentDomain] mutableCopy] ?: [NSMutableDictionary new];
-        hudArguments[@"MetalForceHudEnabled"] = @YES;
-        [NSUserDefaults.standardUserDefaults setVolatileDomain:hudArguments forName:NSArgumentDomain];
-    }
-
-    // Explicit per-guest opt-in. No constructor/global injection into Strata or SideStore.
-    if (!isSideStore) {
-        NSString *fgJSON = [lcSharedDefaults stringForKey:@"StrataFrameGenApps"];
-        NSDictionary *fgApps = fgJSON ? [NSJSONSerialization JSONObjectWithData:[fgJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
-        NSDictionary *fgConfig = [fgApps isKindOfClass:NSDictionary.class] ? fgApps[hudKey] : nil;
-        if ([fgConfig isKindOfClass:NSDictionary.class] && [@[@"2x", @"3x", @"4x", @"benchmark"] containsObject:fgConfig[@"mode"]]) {
-            NSString *library = [lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/StrataFrameGen.dylib"];
-            if (![fm fileExistsAtPath:library]) library = [lcMainBundle.bundlePath stringByAppendingPathComponent:@"../../Frameworks/StrataFrameGen.dylib"];
-            void *fg = dlopen(library.UTF8String, RTLD_NOW | RTLD_LOCAL);
-            void (*startFG)(NSDictionary *, NSString *) = fg ? dlsym(fg, "StrataFrameGenStart") : NULL;
-            if (startFG) startFG(fgConfig, [[LCSharedUtils appGroupPath].path stringByAppendingPathComponent:@"Library/StrataFrameGen"]);
-            else NSLog(@"[Strata] Frame generation unavailable: %s", dlerror());
-        }
-    }
 
     // Attempt to load the bundle. 32-bit bundle will always fail because of 32-bit main executable, so ignore it
     if (!is32bit && ![appBundle loadAndReturnError:&error]) {
@@ -767,66 +766,6 @@ static void exceptionHandler(NSException *exception) {
     }
 }
 
-// Optional keep-alive: a looping silent, mixable sound while an in-process guest is in the background keeps iOS
-// from suspending it, so a short trip to another app no longer loses game progress. Opt-in (battery cost);
-// iOS can still terminate it under memory pressure. The guest's own audio session settings are restored.
-static AVAudioPlayer *strataKeepAlivePlayer;
-static id strataInterruptionObserver;
-static AVAudioSessionCategory strataSavedCategory;
-static AVAudioSessionMode strataSavedMode;
-static AVAudioSessionCategoryOptions strataSavedOptions;
-static NSData *StrataSilentWAV(void) {
-    const uint32_t rate = 8000, samples = 8000, dataSize = samples * 2;
-    NSMutableData *data = [NSMutableData dataWithCapacity:44 + dataSize];
-    uint32_t chunk = 36 + dataSize, fmtSize = 16, byteRate = rate * 2; uint16_t pcm = 1, channels = 1, align = 2, bits = 16;
-    [data appendBytes:"RIFF" length:4]; [data appendBytes:&chunk length:4]; [data appendBytes:"WAVEfmt " length:8];
-    [data appendBytes:&fmtSize length:4]; [data appendBytes:&pcm length:2]; [data appendBytes:&channels length:2];
-    [data appendBytes:&rate length:4]; [data appendBytes:&byteRate length:4]; [data appendBytes:&align length:2]; [data appendBytes:&bits length:2];
-    [data appendBytes:"data" length:4]; [data appendBytes:&dataSize length:4]; [data increaseLengthBy:dataSize];
-    return data;
-}
-// Keep-alive is on unless the user turned it off. 4.0 shipped it as an opt-in setting whose @AppStorage
-// default is never written to disk, so `boolForKey` answered NO even with the switch showing as on.
-static BOOL StrataKeepAliveEnabled(void) {
-    if ([lcSharedDefaults objectForKey:@"StrataKeepGuestAlive"] == nil) return YES;
-    return [lcSharedDefaults boolForKey:@"StrataKeepGuestAlive"];
-}
-static void StrataKeepAliveStart(void) {
-    if (strataKeepAlivePlayer || !StrataKeepAliveEnabled()) return;
-    AVAudioSession *session = AVAudioSession.sharedInstance;
-    strataSavedCategory = session.category; strataSavedMode = session.mode; strataSavedOptions = session.categoryOptions;
-    NSError *error = nil;
-    if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:AVAudioSessionCategoryOptionMixWithOthers error:&error] || ![session setActive:YES error:&error]) {
-        NSLog(@"[Strata] keep-alive audio session failed: %@", error); return;
-    }
-    strataKeepAlivePlayer = [[AVAudioPlayer alloc] initWithData:StrataSilentWAV() error:&error];
-    strataKeepAlivePlayer.numberOfLoops = -1; strataKeepAlivePlayer.volume = 0;
-    if (![strataKeepAlivePlayer play]) { NSLog(@"[Strata] keep-alive player failed: %@", error); strataKeepAlivePlayer = nil; return; }
-    // 用户回音乐 App 按播放、来电结束、系统重新仲裁时，这个会话会被收走，静音流跟着停，
-    // 看起来还在保活其实早就没了。中断结束时重新激活并续上。
-    if (!strataInterruptionObserver) {
-        strataInterruptionObserver = [NSNotificationCenter.defaultCenter addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            if ([note.userInfo[AVAudioSessionInterruptionTypeKey] integerValue] != AVAudioSessionInterruptionTypeEnded) return;
-            if (!strataKeepAlivePlayer) return;
-            NSError *resumeError = nil;
-            if (![AVAudioSession.sharedInstance setActive:YES error:&resumeError]) {
-                NSLog(@"[Strata] keep-alive resume failed: %@", resumeError);
-                return;
-            }
-            if (!strataKeepAlivePlayer.isPlaying) [strataKeepAlivePlayer play];
-        }];
-    }
-}
-static void StrataKeepAliveStop(void) {
-    if (strataInterruptionObserver) {
-        [NSNotificationCenter.defaultCenter removeObserver:strataInterruptionObserver];
-        strataInterruptionObserver = nil;
-    }
-    if (!strataKeepAlivePlayer) return;
-    [strataKeepAlivePlayer stop]; strataKeepAlivePlayer = nil;
-    if (strataSavedCategory) [AVAudioSession.sharedInstance setCategory:strataSavedCategory mode:(strataSavedMode ?: AVAudioSessionModeDefault) options:strataSavedOptions error:nil];
-}
-
 int LiveContainerMain(int argc, char *argv[]) {
     lcMainBundle = [NSBundle mainBundle];
     lcUserDefaults = NSUserDefaults.standardUserDefaults;
@@ -835,7 +774,6 @@ int LiveContainerMain(int argc, char *argv[]) {
     lcAppUrlScheme = NSBundle.mainBundle.infoDictionary[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0];
     lcAppGroupPath = [[NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:[NSClassFromString(@"LCSharedUtils") appGroupID]] path];
     isLiveProcess = [lcAppUrlScheme isEqualToString:@"liveprocess"];
-    StrataStartMemoryOverlaySampler([LCSharedUtils appGroupID], isLiveProcess ? @"app" : @"Strata", isLiveProcess ? @"App" : @"Strata");
     setenv("LC_HOME_PATH", getenv("HOME"), 0);
 
     NSString *selectedApp = [lcUserDefaults stringForKey:@"selected"];
@@ -895,8 +833,6 @@ int LiveContainerMain(int argc, char *argv[]) {
     [NSFileManager.defaultManager createDirectoryAtPath:@(getenv("TMPDIR")) withIntermediateDirectories:YES attributes:nil error:nil];
     
     if([selectedApp isEqualToString:@"ui"]) {
-        // Deliberate return to the launcher: never auto-resume the previous guest.
-        [lcSharedDefaults removeObjectForKey:@"StrataResumeGuest"];
         selectedApp = nil;
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
@@ -965,41 +901,6 @@ int LiveContainerMain(int argc, char *argv[]) {
         });
 
     }
-    // Consume the request before any work: a timeout must return to the launcher,
-    // never repeatedly attach or leave the user in a cold-start loop.
-    NSDictionary *hostJITRequest = [lcUserDefaults dictionaryForKey:@"StrataHostJITRequest"];
-    [lcUserDefaults removeObjectForKey:@"StrataHostJITRequest"];
-    if (selectedApp && selectedContainer && !isSideStore) {
-        NSString *dataFailure = [LCSharedUtils strataAcquireGuestDataLease:selectedContainer];
-        if (dataFailure) {
-            if (isLiveProcess) {
-                NSExtensionContext *context = [NSClassFromString(@"LiveProcessHandler") extensionContext];
-                [context cancelRequestWithError:[NSError errorWithDomain:@"StrataDataLease" code:1 userInfo:@{NSLocalizedDescriptionKey:dataFailure}]];
-                return 1;
-            }
-            [lcUserDefaults setObject:dataFailure forKey:@"error"];
-            [lcUserDefaults removeObjectForKey:@"selected"];
-            [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-            selectedApp = nil; selectedContainer = nil;
-        }
-    }
-    if (hostJITRequest && !isLiveProcess && !isSideStore && selectedApp) {
-        NSTimeInterval age = NSDate.date.timeIntervalSince1970 - [hostJITRequest[@"created"] doubleValue];
-        NSString *failure = nil;
-        if (age < 0 || age > 45 || ![hostJITRequest[@"app"] isEqual:selectedApp] || ![hostJITRequest[@"container"] isEqual:selectedContainer]) {
-            failure = @"The HostJIT startup request expired or did not match this guest. Retry from the launcher.";
-        } else {
-            @try { failure = [LCSharedUtils strataAttachHostJIT:hostJITRequest]; }
-            @catch (NSException *exception) { [LCSharedUtils strataStopHostJIT]; failure = @"HostJIT could not start its helper during cold startup. Disable the experiment and use the existing guest-extension JIT path."; }
-        }
-        if (failure) {
-            [LCSharedUtils strataReleaseGuestDataLease];
-            [lcUserDefaults setObject:failure forKey:@"error"];
-            [lcUserDefaults removeObjectForKey:@"selected"];
-            [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-            selectedApp = nil; selectedContainer = nil;
-        }
-    }
     NSSetUncaughtExceptionHandler(&exceptionHandler);
     if (selectedApp || isSideStore) {
         [lcUserDefaults removeObjectForKey:@"selected"];
@@ -1007,44 +908,6 @@ int LiveContainerMain(int argc, char *argv[]) {
         if(launchUrl) {
             lcLaunchURL = launchUrl;
             [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
-        }
-        if (!isLiveProcess) {
-            StrataStartProcessMemoryDiagnostics([LCSharedUtils appGroupID], selectedApp ?: @"builtinSideStore", @"inProcess");
-        }
-        bool controlsShared = false;
-        NSBundle *controlsBundle = selectedApp ? [LCSharedUtils findBundleWithBundleId:selectedApp isSharedAppOut:&controlsShared] : nil;
-        NSString *controlsName = [controlsBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: [controlsBundle objectForInfoDictionaryKey:@"CFBundleName"] ?: selectedApp ?: @"SideStore";
-        NSString *controlsKey = selectedApp ? [NSString stringWithFormat:@"%@:%@", controlsShared ? @"shared" : @"local", selectedApp] : @"builtin:sidestore";
-        StrataStartGuestControlsWithIdentity([LCSharedUtils appGroupID], controlsName, isLiveProcess, controlsKey);
-        StrataStartMemoryOverlaySampler([LCSharedUtils appGroupID], isLiveProcess ? @"app" : @"Strata + app", controlsName);
-        // iOS often terminates a backgrounded game to reclaim memory; the next cold start would then show the
-        // launcher. Remember the guest only while it is in the background so the launcher can reopen it.
-        [lcSharedDefaults removeObjectForKey:@"StrataResumeGuest"];
-        // 无缝切换（默认开）时 guest 跑在 LiveProcess.appex 里，扩展的后台寿命比主进程短得多，
-        // 而这里原来排除了 isLiveProcess —— 等于扩展模式下完全没有保活。该扩展的 Info.plist
-        // 本来就声明了 UIBackgroundModes: audio，所以一并放开；商店自己有保活，继续跳过。
-        if (selectedApp && !isSideStore) {
-            NSString *resumeKey = controlsKey;
-            void (^rememberGuest)(NSNotification *) = ^(NSNotification *note) {
-                // 无缝模式下这段代码跑在 LiveProcess.appex 里，标准 UserDefaults 是扩展自己的域，
-                // 主 App 读不到；必须写进 app group，否则「被 iOS 杀掉后重开」永远不生效。
-                [lcSharedDefaults setObject:@{@"key": resumeKey, @"time": @(NSDate.date.timeIntervalSince1970)} forKey:@"StrataResumeGuest"];
-                StrataKeepAliveStart();
-            };
-            void (^forgetGuest)(NSNotification *) = ^(NSNotification *note) {
-                [lcSharedDefaults removeObjectForKey:@"StrataResumeGuest"];
-                StrataKeepAliveStop();
-            };
-            // 主进程走 UIKit 的前后台通知；跑在 LiveProcess.appex 里时 UIKit 那套不一定投递，
-            // 补一份扩展宿主自己的通知，两边谁先到都行（StrataKeepAliveStart 有重入保护）。
-            NSArray<NSString *> *backgroundNames = @[UIApplicationDidEnterBackgroundNotification, @"NSExtensionHostDidEnterBackgroundNotification"];
-            NSArray<NSString *> *foregroundNames = @[UIApplicationWillEnterForegroundNotification, @"NSExtensionHostWillEnterForegroundNotification"];
-            for (NSString *name in backgroundNames) {
-                [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:rememberGuest];
-            }
-            for (NSString *name in foregroundNames) {
-                [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:forgetGuest];
-            }
         }
         NSString *appError = invokeAppMain(selectedApp, selectedContainer, argc, argv);
         if (appError) {

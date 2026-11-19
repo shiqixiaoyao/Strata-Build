@@ -16,6 +16,5 @@
 #include "../MultitaskSupport/PiPManager.h"
 #include "../MultitaskSupport/VirtualWindowsHostView.h"
 #include "../LiveContainer/FoundationPrivate.h"
-#import "../LiveContainer/Localization.h"
 
 #endif /* LiveContainerSwiftUI_Bridging_Header_h_h */

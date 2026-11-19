@@ -92,19 +92,40 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
     }
 
     @objc private func runButtonTapped() {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await configuration.model.launchFromLibrary()
-            } catch {
-                showError(error.localizedDescription)
+        if #available(iOS 16.0, *),
+           let currentDataFolder = configuration.model.uiSelectedContainer?.folderName,
+           MultitaskManager.isUsing(container: currentDataFolder) {
+            var found = false
+            if #available(iOS 16.1, *) {
+                found = MultitaskWindowManager.openExistingAppWindow(dataUUID: currentDataFolder)
             }
+            if !found {
+                found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: currentDataFolder)
+            }
+            if found {
+                return
+            }
+        }
+
+        Task { [weak self] in
+            await self?.runApp()
         }
     }
 
     private func runApp(multitask: Bool? = nil) async {
+        if configuration.model.appInfo.isLocked && !DataManager.shared.model.isHiddenAppUnlocked {
+            do {
+                if !(try await LCUtils.authenticateUser()) {
+                    return
+                }
+            } catch {
+                showError(error.localizedDescription)
+                return
+            }
+        }
+
         do {
-            try await configuration.model.launchFromLibrary(multitask: multitask, reuseExistingWindow: false)
+            try await configuration.model.runApp(multitask: multitask)
         } catch {
             showError(error.localizedDescription)
         }
@@ -126,7 +147,7 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
                     self?.refreshView()
                 }
             }
-            menuChildren.append(UIMenu(title: "Containers".loc, options: .displayInline, children: containerActions))
+            menuChildren.append(UIMenu(title: "Containers", options: .displayInline, children: containerActions))
         }
 
         // 2. Main Section

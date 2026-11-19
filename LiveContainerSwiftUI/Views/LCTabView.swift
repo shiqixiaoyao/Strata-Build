@@ -9,8 +9,6 @@ import Foundation
 import SwiftUI
 
 struct LCTabView: View {
-    @ObservedObject private var refreshReminder = StrataAutoRefresh.shared
-    @State private var refreshSetup = false
     @State var errorShow = false
     @State var crashReportShow = false
     @State var errorInfo = ""
@@ -24,13 +22,33 @@ struct LCTabView: View {
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
     
     var body: some View {
-        LiveBoardRootView()
-        .alert("Refresh Strata", isPresented: $refreshReminder.showReminder) {
-            Button("Refresh") { refreshReminder.launchRefreshShortcut() }
-            Button("Later", role: .cancel) { refreshReminder.snooze() }
-        } message: { Text(refreshReminder.reminderMessage.loc) }
-        .sheet(isPresented: $refreshSetup) { NavigationView { StrataAutoRefreshSettings().toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { refreshSetup = false } } } } }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("StrataOpenRefreshSetup"))) { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { refreshSetup = true } }
+        TabView(selection: $sharedModel.selectedTab) {
+            if DataManager.shared.model.multiLCStatus != 2 {
+                LCSourcesView()
+                    .tabItem {
+                        Label("lc.tabView.sources".loc, systemImage: "books.vertical")
+                    }
+                    .tag(LCTabIdentifier.sources)
+            }
+            LCAppListView()
+                .tabItem {
+                    Label("lc.tabView.apps".loc, systemImage: "square.stack.3d.up.fill")
+                }
+                .tag(LCTabIdentifier.apps)
+            if DataManager.shared.model.multiLCStatus != 2 {
+                LCTweaksView()
+                    .tabItem{
+                        Label("lc.tabView.tweaks".loc, systemImage: "wrench.and.screwdriver")
+                    }
+                    .tag(LCTabIdentifier.tweaks)
+            }
+            
+            LCSettingsView()
+                .tabItem {
+                    Label("lc.tabView.settings".loc, systemImage: "gearshape.fill")
+                }
+                .tag(LCTabIdentifier.settings)
+        }
         .downloadAlert(helper: downloadHelper)
         .environmentObject(downloadHelper)
         .alert("lc.common.error".loc, isPresented: $errorShow){
@@ -99,9 +117,7 @@ struct LCTabView: View {
     func dispatchURL(url: URL) {
         repeat {
             if url.isFileURL {
-                // 证书文件属于设置页，其他文件（IPA / dylib / framework）属于 App 页。
-                let ext = url.pathExtension.lowercased()
-                sharedModel.selectedTab = ["p12", "pfx", "pkcs12"].contains(ext) ? .settings : .apps
+                sharedModel.selectedTab = .apps
                 break
             }
             if url.scheme?.lowercased() == "sidestore" {
@@ -209,7 +225,7 @@ struct LCTabView: View {
         
         let task = SecTaskCreateFromSelf(nil)
         guard let value = SecTaskCopyValueForEntitlement(task, "application-identifier" as CFString, nil), let appIdentifier = value.takeRetainedValue() as? String else {
-            errorInfo = "Unable to determine application-identifier".loc
+            errorInfo = "Unable to determine application-identifier"
             errorShow = true
             return
         }
@@ -249,7 +265,7 @@ struct LCTabView: View {
         }
         
         guard let bookmark = LCUtils.bookmark(for: LCPath.docPath) else {
-            errorInfo = "Failed to create bookmark for Documents folder?".loc
+            errorInfo = "Failed to create bookmark for Documents folder?"
             errorShow = true
             return
         }

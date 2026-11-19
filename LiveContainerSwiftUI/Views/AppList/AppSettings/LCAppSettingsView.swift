@@ -148,20 +148,11 @@ struct LCAppSettingsView: View {
                     Text("lc.appSettings.helperProcessesSupport".loc)
                 }
                 .disabled(model.uiIs32bit)
-                Text("Launch in Game Mode declares support and requests a fullscreen launch. iOS controls activation; check Game Overlay in Control Center. This does not grant extra RAM.").font(.footnote).foregroundStyle(.secondary)
-                Toggle(isOn: $model.uiHelperProcessesSupport) {
-                    Text("lc.appSettings.helperProcessesSupport".loc)
-                }
-                .disabled(model.uiIs32bit)
                 Toggle(isOn: $model.uiIsJITNeeded) {
                     Text("lc.appSettings.launchWithJit".loc)
                 }
                 .disabled(model.uiIs32bit)
-                if #available(iOS 26.0, *) {
-                    Picker("JIT script", selection: Binding(get: { model.strataJITScriptMode }, set: { model.strataJITScriptMode = $0 })) {
-                        ForEach(StrataJITScriptMode.allCases) { mode in Text(mode.title).tag(mode) }
-                    }
-                    Text("Automatic preserves your imported script and selects Universal only for verified compatible apps. Other apps need the script recommended by their developer. Switching modes does not delete an imported script.").font(.footnote).foregroundStyle(.secondary)
+                if #available(iOS 26.0, *), model.uiIsJITNeeded, !model.uiIs32bit {
                     HStack {
                         Text("lc.appSettings.jit26.script".loc)
                         Spacer()
@@ -565,7 +556,7 @@ struct LCAppSettingsView: View {
             }
             
             guard let bookmark = LCUtils.bookmark(for: url) else {
-                errorInfo = "Unable to generate a bookmark for the selected URL!".loc
+                errorInfo = "Unable to generate a bookmark for the selected URL!"
                 errorShow = true
                 return
             }

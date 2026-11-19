@@ -18,7 +18,7 @@ struct LCEntitlementView : View {
     @State var isBundleIdCorrect = false
     @State var appGroup = false
     
-    @State var entitlementContent = "Failed to Load Entitlement.".loc
+    @State var entitlementContent = "Failed to Load Entitlement."
     
     var body: some View {
         if loaded {
@@ -81,7 +81,7 @@ struct LCEntitlementView : View {
                         .font(.system(.subheadline, design: .monospaced))
                 }
             }
-            .navigationTitle(isLiveProcess ? "LiveProcess Entitlements".loc : "LiveContainer Entitlements".loc)
+            .navigationTitle(isLiveProcess ? "LiveProcess Entitlements" : "LiveContainer Entitlements")
             .navigationBarTitleDisplayMode(.inline)
         } else {
             Text("lc.common.loading".loc)
@@ -107,13 +107,13 @@ struct LCEntitlementView : View {
         } else {
             executablePath = Bundle.main.builtInPlugInsURL?.appendingPathComponent("LiveProcess.appex/LiveProcess").path
             if let executablePath, !FileManager.default.fileExists(atPath: executablePath) {
-                entitlementContent = "LiveProcess is not installed.".loc
+                entitlementContent = "LiveProcess is not installed."
                 return
             }
         }
 
         guard let entitlementXML = getExecutableEntitlementXML(executablePath) else {
-            entitlementContent = "Failed to load entitlement.".loc
+            entitlementContent = "Failed to load entitlement."
             return
         }
         entitlementContent = entitlementXML
@@ -335,7 +335,7 @@ struct LCJITLessDiagnoseView : View {
             }
             .alert("lc.common.success".loc, isPresented: $successShow){
             } message: {
-                Text(successInfo.loc)
+                Text(successInfo)
             }
             
         } else {
@@ -351,7 +351,7 @@ struct LCJITLessDiagnoseView : View {
         
         let task = SecTaskCreateFromSelf(nil)
         guard let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.team-identifier" as CFString, nil), let teamId = value.takeRetainedValue() as? String else {
-            errorInfo = "Failed to read com.apple.developer.team-identifier".loc
+            errorInfo = "Failed to read com.apple.developer.team-identifier"
             errorShow = true
             return
         }

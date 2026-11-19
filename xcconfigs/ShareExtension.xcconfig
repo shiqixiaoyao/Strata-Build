@@ -9,8 +9,9 @@
 
 PRODUCT_BUNDLE_IDENTIFIER = $(LIVECONTAINER_BUNDLE_IDENTIFIER).ShareExtension
 
-
+// Built-in StikJIT: the helper extension links the idevice engine statically.
 SWIFT_INCLUDE_PATHS = $(inherited) $(SRCROOT)/Vendor/StikJIT/idevice $(SRCROOT)/Vendor/StikJIT/iokit
 HEADER_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor/StikJIT/idevice $(SRCROOT)/Vendor/StikJIT/iokit
 LIBRARY_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor/StikJIT/idevice
 OTHER_LDFLAGS = $(inherited) -Wl,-hidden-lidevice_ffi -framework JavaScriptCore -framework Network -framework Security -framework CFNetwork -framework SystemConfiguration -framework IOKit
+

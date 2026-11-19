@@ -1,3 +1,5 @@
+name: Xcode - Build
+
 on: 
   push:
     branches: [ main ]
@@ -31,52 +33,6 @@ jobs:
       - name: Fetch bundled dependencies
         run: |
           python3 Scripts/fetch-bundled-dependencies.py
-      - name: Merge Chinese Localization
-        run: |
-          python3 -c "
-          import json
-          from pathlib import Path
-
-          catalog_path = Path('Resources/Localizable.xcstrings')
-          fragment_path = Path('Resources/Strata2-zh-Hans.xcstrings-fragment.json')
-          with catalog_path.open(encoding='utf-8') as f:
-              catalog = json.load(f)
-          with fragment_path.open(encoding='utf-8') as f:
-              fragment = json.load(f)
-
-          if not isinstance(catalog, dict) or not isinstance(catalog.get('strings'), dict):
-              raise ValueError('Localizable.xcstrings must be an Apple string catalog with a strings object')
-          if not isinstance(fragment, dict):
-              raise ValueError('Chinese localization fragment must be a JSON object')
-
-          for key, value in fragment.items():
-              if not isinstance(key, str) or not isinstance(value, str):
-                  raise ValueError(f'Expected string key/value in Chinese fragment: {key!r}')
-              entry = catalog['strings'].setdefault(key, {})
-              if not isinstance(entry, dict):
-                  raise ValueError(f'Invalid catalog entry for {key!r}')
-              localizations = entry.setdefault('localizations', {})
-              if not isinstance(localizations, dict):
-                  raise ValueError(f'Invalid localizations object for {key!r}')
-              localizations['zh-Hans'] = {
-                  'stringUnit': {
-                      'state': 'translated',
-                      'value': value
-                  }
-              }
-
-          # Confirm the generated document remains valid JSON and catalog structure.
-          output = json.dumps(catalog, ensure_ascii=False, indent=2) + '\\n'
-          parsed = json.loads(output)
-          if not isinstance(parsed.get('strings'), dict):
-              raise ValueError('Generated catalog is missing its strings object')
-          for key in fragment:
-              unit = parsed['strings'][key]['localizations']['zh-Hans']['stringUnit']
-              if unit.get('state') != 'translated' or not isinstance(unit.get('value'), str):
-                  raise ValueError(f'Invalid zh-Hans string unit for {key!r}')
-          catalog_path.write_text(output, encoding='utf-8')
-          print(f'Successfully merged {len(fragment)} Chinese localizations into Apple string catalog!')
-          "
       - name: Set Scheme
         id: scheme
         run: |

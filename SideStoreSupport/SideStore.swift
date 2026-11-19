@@ -60,17 +60,8 @@ public struct RefreshAllAppsIntent: AppIntent, CustomIntentMigratedAppIntent, Pr
     
     public func perform() async throws -> some IntentResult & ProvidesDialog
     {
-        let preferences = UserDefaults(suiteName: LCSharedUtils.appGroupID()) ?? .standard
-        preferences.set(Date(), forKey: "StrataRefreshLastAttempt")
-        do {
-            try await performIntentRefresh(identifier: "RefreshAllIntent", mangledTypeName: "9SideStore20RefreshAllAppsIntentV", intentProgress: progress)
-            preferences.set(Date(), forKey: "StrataRefreshLastSuccess")
-            preferences.set("SideStore confirmed all apps refreshed successfully.", forKey: "StrataRefreshStatus")
-            return .result(dialog: "All apps have been refreshed.")
-        } catch {
-            preferences.set("Refresh failed: " + error.localizedDescription, forKey: "StrataRefreshStatus")
-            throw error
-        }
+        try await performIntentRefresh(identifier: "RefreshAllIntent", mangledTypeName: "9SideStore20RefreshAllAppsIntentV", intentProgress: progress)
+        return .result(dialog: "All apps have been refreshed.")
     }
     
 }
@@ -84,14 +75,10 @@ class RefreshHandler: NSObject, RefreshServer {
     var sideStorePid: Int32 = 0
     var client: RefreshClient? = nil
     var ext: NSExtension? = nil
-    private var launchID: UUID?
-    private var connected: NSXPCConnection?
-    private var hasFinishedLaunching = false
     
     static var shared = RefreshHandler()
     
-    @MainActor func startRefresh(identifier: String, mangledName: String) async throws {
-        try Task.checkCancellation()
+    func startRefresh(identifier: String, mangledName: String) async throws {
         if sideStorePid <= 0 || getpgid(sideStorePid) <= 0, let c {
             c.resume(throwing: NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Built-in SideStore quit unexpectedly"]))
             self.c = nil
@@ -103,12 +90,12 @@ class RefreshHandler: NSObject, RefreshServer {
         
         if listener == nil {
             guard let listener = startAnonymousListener(self) else {
-                throw NSError(domain: "SideStore", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unable to create the SideStore refresh connection."])
+                return
             }
             self.listener = listener
         }
         guard let listener = self.listener else {
-            throw NSError(domain: "SideStore", code: 2, userInfo: [NSLocalizedDescriptionKey: "SideStore refresh connection is unavailable."])
+            return
         }
 
         // launch SideStore if it's not running
@@ -140,34 +127,24 @@ class RefreshHandler: NSObject, RefreshServer {
                 throw NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to start extension \(error). To use the Refresh All Apps shortcut, reinstall LiveContainer+SideStore with LiveProcess installed. If you use SideStore, choose \"Keep App Extensions (Use Main Profile)\". If you use Impactor, choose \"Only Register Main Bundle\". For other sideloaders, select keep all extensions, i.e. DO NOT Remove any extension."])
             }
             guard let ext else {
-                throw NSError(domain: "SideStore", code: 2, userInfo: [NSLocalizedDescriptionKey: "SideStore refresh extension is unavailable."])
+                return
             }
             self.ext = ext
             
-            let currentLaunch = UUID(); launchID = currentLaunch; hasFinishedLaunching = false
-            ext.setRequestInterruptionBlock { _ in
-                DispatchQueue.main.async {
-                    guard self.launchID == currentLaunch else { return }
-                    let running = self.c, launching = self.launchContinuation
-                    self.c = nil; self.launchContinuation = nil; self.sideStorePid = 0
-                    self.launchID = nil; self.hasFinishedLaunching = false
-                    self.connected?.invalidate(); self.connected = nil; self.client = nil
-                    let error = NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Built-in SideStore quit unexpectedly"])
-                    running?.resume(throwing: error)
-                    launching?.resume(throwing: error)
-                }
+            ext.setRequestInterruptionBlock { uuid in
+                self.c?.resume(throwing: NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Built-in SideStore quit unexpectedly"]))
+                self.c = nil
+                self.sideStorePid = 0
+                self.launchContinuation = nil
             }
-
+            
             let uuid = await ext.beginRequest(withInputItems: [extensionItem])
-            if Task.isCancelled { ext._kill(9); throw CancellationError() }
             sideStorePid = ext.pid(forRequestIdentifier: uuid)
             
-            try Task.checkCancellation()
             try await withUnsafeThrowingContinuation { c in
-                if self.hasFinishedLaunching { c.resume(); return }
                 self.launchContinuation = c
                 DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
-                    if self.launchID == currentLaunch, let c = self.launchContinuation {
+                    if let c = self.launchContinuation {
                         c.resume(throwing: NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Built-in SideStore failed to start in reasonable time"]))
                         self.launchContinuation = nil
                         ext._kill(9)
@@ -175,57 +152,36 @@ class RefreshHandler: NSObject, RefreshServer {
                 }
             }
         }
-        try Task.checkCancellation()
-        guard let client = self.client else {
-            throw NSError(domain: "SideStore", code: 2, userInfo: [NSLocalizedDescriptionKey: "SideStore did not establish its refresh connection."])
-        }
+        self.client?.refreshAllApps(withIdentifier: identifier, mangledTypeName: mangledName)
+        
         try await withUnsafeThrowingContinuation { c in
             self.c = c
-            client.refreshAllApps(withIdentifier: identifier, mangledTypeName: mangledName)
         }
         
     }
     
-    @MainActor func abortStrataRefresh() {
-        launchID = nil; hasFinishedLaunching = false
-        connected?.invalidate(); connected = nil
-        let launch = launchContinuation, running = c
-        launchContinuation = nil; c = nil
-        launch?.resume(throwing: CancellationError())
-        running?.resume(throwing: CancellationError())
-        ext?._kill(9)
-        ext = nil; sideStorePid = 0; client = nil
-    }
-
     func updateProgress(_ value: Double) {
-        DispatchQueue.main.async { self.progress?.completedUnitCount = Int64(value * 100) }
+        progress?.completedUnitCount = Int64(value*100)
     }
-
+    
     func finish(_ error: String?) {
-        DispatchQueue.main.async {
-            let running = self.c; self.c = nil
-            if let error {
-                running?.resume(throwing: NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: error]))
-            } else { running?.resume() }
+        if let error {
+            c?.resume(throwing: NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: error]))
+            c = nil
+        } else {
+            c?.resume()
+            c = nil
         }
     }
-
+    
     func onConnection(_ connection: NSXPCConnection!) {
         connection.remoteObjectInterface = NSXPCInterface(with: RefreshClient.self)
-        DispatchQueue.main.async {
-            guard self.launchID != nil, self.sideStorePid <= 0 || self.sideStorePid == connection.processIdentifier else { connection.invalidate(); return }
-            self.connected = connection
-            self.client = connection.remoteObjectProxy as? RefreshClient
-        }
+        client = connection.remoteObjectProxy as? RefreshClient
     }
-
+    
     func finishedLaunching() {
-        DispatchQueue.main.async {
-            guard self.launchID != nil else { return }
-            self.hasFinishedLaunching = true
-            let launching = self.launchContinuation; self.launchContinuation = nil
-            launching?.resume()
-        }
+        launchContinuation?.resume()
+        launchContinuation = nil
     }
 
     func add(_ request: UNNotificationRequest) {

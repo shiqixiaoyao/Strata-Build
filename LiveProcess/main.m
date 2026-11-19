@@ -6,15 +6,14 @@
 //
 
 #import <dlfcn.h>
-#import "StrataJITGuestGate.h"
-#import "StrataGuestMemory.h"
-#import "../LiveContainer/LCSharedUtils.h"
-#import "../LiveContainer/StrataRuntimePath.h"
 #import <UIKit/UIKit.h>
 #import <mach-o/dyld.h>
 #import "../LiveContainer/utils.h"
 #import "../LiveContainer/Tweaks/Tweaks.h"
 #import "../SideStoreSupport/XPCServer.h"
+#import "../LiveContainer/LivePlugInSupport/PrivateXPC.h"
+#import "../LiveContainer/LivePlugInSupport/LivePlugInServer.h"
+#import "../LiveContainer/LCSharedUtils.h"
 
 @interface LiveProcessHandler : NSObject<NSExtensionRequestHandling>
 @end
@@ -45,10 +44,6 @@ int LiveProcessMain(int argc, char *argv[]) {
     // Ensure app info is delivered
     NSDictionary *appInfo = LiveProcessHandler.retrievedAppInfo;
     NSCAssert(appInfo, @"Failed to retrieve app info");
-    NSDictionary *guestExtension = appInfo[@"LCGuestExtension"];
-    if (guestExtension) {
-        return LCRunGuestExtension(guestExtension, LiveProcessHandler.extensionContext);
-    }
     
     // Check if we received a request to execute a custom payload
     NSString *customPayloadDylib = appInfo[@"customPayloadDylib"];
@@ -62,7 +57,7 @@ int LiveProcessMain(int argc, char *argv[]) {
         return payloadEntry(argc, argv, _envp, _apple);
     }
     
-
+    NSLog(@"Retrieved app info: %@", appInfo);
     // Set LiveContainer's home path
     setenv("LP_HOME_PATH", getenv("HOME"), 1);
     const char *overrideHomePath = [appInfo[@"lcHomePath"] fileSystemRepresentation];
@@ -80,24 +75,10 @@ int LiveProcessMain(int argc, char *argv[]) {
     for(int i = 0; i < bookmarks.count; i++) {
         bool isStale = false;
         NSError* error = nil;
-        NSURL *url = [NSURL URLByResolvingBookmarkData:bookmarks[i] options:0 relativeToURL:nil bookmarkDataIsStale:&isStale error:&error];
-        if (!url) {
-            [LiveProcessHandler.extensionContext cancelRequestWithError:error ?: [NSError errorWithDomain:@"StrataRuntime" code:3 userInfo:@{NSLocalizedDescriptionKey:NSLocalizedString(@"Cannot resolve guest file access. Relaunch from the app library.", nil)}]];
-            return 1;
-        }
-        [bookmarkedUrls addObject:url];
-        access = [url startAccessingSecurityScopedResource];
+        bookmarkedUrls[i] = [NSURL URLByResolvingBookmarkData:bookmarks[i] options:0 relativeToURL:nil bookmarkDataIsStale:&isStale error:&error];
+        access = [bookmarkedUrls[i] startAccessingSecurityScopedResource];
     }
     
-    NSString *runtimeName = appInfo[@"strataRuntimeName"];
-    if (runtimeName.length) {
-        bool shared = false;
-        NSBundle *runtime = StrataFind32BitRuntime(runtimeName, [NSURL fileURLWithPath:[NSString stringWithFormat:@"%s/Documents", getenv("LC_HOME_PATH")]], [LCSharedUtils appGroupPath]);
-        if (!runtime.executablePath || ![NSFileManager.defaultManager isReadableFileAtPath:runtime.executablePath]) {
-            [LiveProcessHandler.extensionContext cancelRequestWithError:[NSError errorWithDomain:@"StrataRuntime" code:4 userInfo:@{NSLocalizedDescriptionKey:NSLocalizedString(@"The guest cannot read its selected 32-bit runtime after granting file access.", nil)}]];
-            return 1;
-        }
-    }
     if ([appInfo[@"selected"] isEqualToString:@"builtinSideStore"]) {
         if(access && bookmarkedUrls.count > 0) {
             [lcUserDefaults setObject:bookmarkedUrls.firstObject.path forKey:@"specifiedSideStoreContainerPath"];
@@ -119,24 +100,6 @@ int LiveProcessMain(int argc, char *argv[]) {
     }
 
     
-    NSString *jitToken = appInfo[@"strataJITToken"];
-    if (jitToken) {
-        NSString *group = appInfo[@"strataJITGroup"];
-        NSURL *root = group ? [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:group] : nil;
-        NSError *gateError = StrataWaitForGuestDebugger(jitToken, root, 360, ^BOOL(NSError **error) {
-            unsigned int flags = 0;
-            if (csops(getpid(), 0, &flags, sizeof(flags)) != 0) {
-                *error = [NSError errorWithDomain:@"StrataJITGuest" code:13 userInfo:@{NSLocalizedDescriptionKey:NSLocalizedString(@"Cannot read guest debugging status.", nil)}];
-                return NO;
-            }
-            return (flags & CS_DEBUGGED) != 0;
-        });
-        if (gateError) {
-            [LiveProcessHandler.extensionContext cancelRequestWithError:gateError];
-            return 1;
-        }
-    }
-    StrataStartGuestMemoryDiagnostics(appInfo[@"strataDiagnosticsGroup"], appInfo[@"selected"]);
     return LiveContainerMain(argc, argv);
 }
 
@@ -160,8 +123,22 @@ static void* hook_dlopen(void* dyldApiInstancePtr, const char* path, int mode) {
     }
 }
 
+extern int LivePlugInMain(int argc, char *argv[], char *envp[], char *apple[]);
 // Extension entry point
 int NSExtensionMain(int argc, char *argv[], char *envp[], char *apple[]) {
+    xpc_object_t properties = launch_copy_extension_properties_for_pid(getpid());
+    pid_t expectedHostPID = (pid_t)xpc_dictionary_get_int64(properties, "XPCExtensionHostPID");
+
+    NSString *appGroup = LCSharedUtils.appGroupID;
+
+    NSString *service = LCLivePlugInServiceName(appGroup, expectedHostPID);
+    mach_port_t port = MACH_PORT_NULL;
+    kern_return_t status = bootstrap_look_up(bootstrap_port, service.UTF8String, &port);
+    if (status == KERN_SUCCESS && MACH_PORT_VALID(port)) {
+        mach_port_deallocate(mach_task_self(), port);
+        return LivePlugInMain(argc, argv, envp, apple);
+    }
+    
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wundeclared-selector"
     method_setImplementation(class_getInstanceMethod(NSClassFromString(@"NSXPCDecoder"), @selector(_validateAllowedClass:forKey:allowingInvocations:)), (IMP)hook_do_nothing);

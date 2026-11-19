@@ -155,8 +155,11 @@ final class AltStoreSourcesViewModel: ObservableObject {
     private let defaultsKey = "LCAltStoreSourceURLs"
 
     private let cacheDirectoryName = "AltStoreSourceCache"
+    private var hasLoadedSources = false
     
-    init() {
+    func loadSourcesIfNeeded() {
+        guard !hasLoadedSources else { return }
+        hasLoadedSources = true
         loadStoredSources()
         Task {
             await refreshAllSources()
@@ -610,12 +613,20 @@ struct LCSourcesView: View {
         .searchable(text: $searchContext.query, placement: .navigationBarDrawer(displayMode: .always))
 
         .onAppear {
+            if sharedModel.selectedTab == .sources {
+                viewModel.loadSourcesIfNeeded()
+            }
             expandedSources = []
             if !isViewAppeared {
                 guard sharedModel.selectedTab == .sources, let link = sharedModel.deepLink else { return }
                 sharedModel.deepLink = nil
                 handleURL(url: link)
                 isViewAppeared = true
+            }
+        }
+        .onChange(of: sharedModel.selectedTab) { tab in
+            if tab == .sources {
+                viewModel.loadSourcesIfNeeded()
             }
         }
         .onChange(of: viewModel.sources) { newSources in
@@ -891,7 +902,7 @@ private struct AltStoreSourceSectionView: View {
             }
             
             if let subtitle = item.source?.subtitle, !subtitle.isEmpty {
-                Text(subtitle.loc)
+                Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else if item.source == nil, let host = item.url.host {
@@ -1010,7 +1021,7 @@ private struct LCSourceAppBanner: View {
                         .foregroundColor(textColor)
                         .lineLimit(1)
                     if !subtitleText.isEmpty {
-                        Text(subtitleText.loc)
+                        Text(subtitleText)
                             .font(.system(size: 11))
                             .foregroundColor(textColor)
                             .lineLimit(1)

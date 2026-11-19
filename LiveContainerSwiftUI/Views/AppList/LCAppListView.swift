@@ -37,9 +37,6 @@ struct AppReplaceOption : Hashable {
 }
 
 struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
-    @AppStorage("LiveBoardMode", store: LCUtils.appGroupUserDefault) private var liveBoardMode = "ios"
-    @State private var manageLibrary = false
-    private var builtInSideStore: LCAppModel? { LiveBoardBundledApps.sideStore }
     @State var didAppear = false
     // ipa choosing stuff
     @State var choosingIPA = false
@@ -95,32 +92,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         return sharedAppSortManager.sortedHiddenApps
     }
     
-    @ObservedObject private var phoneApps = StrataPhoneApps.shared
-
-    @AppStorage(StrataLauncherOrder.key, store: LCUtils.appGroupUserDefault) private var launcherOrder = "[]"
-    var launcherApps: [LCAppModel] {
-        StrataLauncherOrder.apply(sortedApps + (builtInSideStore.map { [$0] } ?? []) + phoneApps.models + (StrataBuiltInSettings.model.map { [$0] } ?? []), order: launcherOrder)
-    }
-
-    var filteredLauncherApps: [LCAppModel] {
-        launcherApps.filter { searchContext.debouncedQuery.isEmpty ||
-            $0.displayName.localizedCaseInsensitiveContains(searchContext.debouncedQuery) ||
-            $0.bundleIdentifier.localizedCaseInsensitiveContains(searchContext.debouncedQuery) }
-    }
-
-    func manageLauncherApp(_ app: LCAppModel) {
-        if app.appInfo is StrataSettingsAppInfo { NotificationCenter.default.post(name: .strataOpenSettings, object: nil); return }
-        if app.appInfo is StrataPhoneAppInfo {
-            openNavigationView(view: AnyView(StrataPhoneAppsView()))
-            return
-        }
-        if app.appInfo is BuiltInSideStoreAppInfo {
-            sharedModel.selectedTab = .settings
-        } else {
-            openNavigationView(view: AnyView(LCAppSettingsView(model: app)))
-        }
-    }
-
     var filteredApps: [LCAppModel] {
         let apps = sortedApps
         if searchContext.debouncedQuery.isEmpty {
@@ -145,59 +116,29 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    let openInterface: () -> Void
-
-    init(openInterface: @escaping () -> Void = {}) {
-        self.openInterface = openInterface
+    init() {
         _installOptions = State(initialValue: [])
     }
     
     var body: some View {
         NavigationView {
-            ZStack {
-                NavigationLink(destination: navigateTo, isActive: $isNavigationActive) { EmptyView() }.hidden()
-                if liveBoardMode == "switchboard" && !manageLibrary {
-                    StrataSwitchboard(apps: launcherApps, launch: { app in Task { await launchFromLiveBoard(app) } }, manage: manageLauncherApp, openInterface: openInterface, openManagement: { manageLibrary = true }, launchWithJIT: { app in Task { await launchFromLiveBoard(app, forceJIT: true) } }, launchMultitask: { app in Task { await launchFromLiveBoard(app, multitask: true) } }, launchInGameMode: { app in Task { await launchFromLiveBoard(app, gameMode: true) } }, launchWithMetalHUD: { app in Task { await launchFromLiveBoard(app, metalHUD: true) } })
-                } else if let style = StrataGalleryStyle(rawValue: liveBoardMode), !manageLibrary {
-                    StrataGalleryScreen(style: style, apps: launcherApps, launch: { app in Task { await launchFromLiveBoard(app) } }, manage: manageLauncherApp, openInterface: openInterface, openManagement: { manageLibrary = true }, launchWithJIT: { app in Task { await launchFromLiveBoard(app, forceJIT: true) } }, launchMultitask: { app in Task { await launchFromLiveBoard(app, multitask: true) } }, launchInGameMode: { app in Task { await launchFromLiveBoard(app, gameMode: true) } }, launchWithMetalHUD: { app in Task { await launchFromLiveBoard(app, metalHUD: true) } })
-                        .id(style.rawValue)
-                } else if liveBoardMode == "ios" && !manageLibrary {
-                    LiveBoardHomeScreen(apps: launcherApps,
-                                        launch: { app in Task { await launchFromLiveBoard(app) } },
-                                        manage: manageLauncherApp,
-                                        openInterface: openInterface,
-                                        openManagement: { manageLibrary = true },
-                                        openTab: { sharedModel.selectedTab = $0 },
-                                        secondaryInstance: sharedModel.multiLCStatus == 2,
-                                        launchWithJIT: { app in Task { await launchFromLiveBoard(app, forceJIT: true) } },
-                                        launchInGameMode: { app in Task { await launchFromLiveBoard(app, gameMode: true) } },
-                                        launchWithMetalHUD: { app in Task { await launchFromLiveBoard(app, metalHUD: true) } },
-                                        launchMultitask: { app in Task { await launchFromLiveBoard(app, multitask: true) } },
-                                        uninstall: { app, removeData in uninstallLauncherApp(app, removeData: removeData) })
-                } else if !manageLibrary {
-                    LiveBoardConsoleScreen(apps: launcherApps, mode: liveBoardMode,
-                                           launch: { app in await launchFromLiveBoard(app) },
-                                           manage: manageLauncherApp,
-                                           openInterface: openInterface,
-                                           openManagement: { manageLibrary = true },
-                                           launchWithJIT: { app in await launchFromLiveBoard(app, forceJIT: true) },
-                                           launchInGameMode: { app in await launchFromLiveBoard(app, gameMode: true) },
-                                           launchWithMetalHUD: { app in await launchFromLiveBoard(app, metalHUD: true) },
-                                           launchMultitask: { app in await launchFromLiveBoard(app, multitask: true) })
-                } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Button(manageLibrary ? "Back to launcher".loc : "Manage apps".loc) {
-                        manageLibrary.toggle()
+                NavigationLink(
+                    destination: navigateTo,
+                    isActive: $isNavigationActive,
+                    label: {
+                        EmptyView()
+                })
+                .hidden()
+                
+                LazyVStack {
+                    ForEach(filteredApps, id: \.self) { app in
+                        LCAppBanner(appModel: app, delegate: self)
                     }
-                    LazyVStack {
-                        ForEach(filteredApps, id: \.self) { app in
-                            LCAppBanner(appModel: app, delegate: self)
-                                        .frame(height: LCAppBannerRootView.bannerHeight)
-                        }
-                    }
-
-                }.padding().padding(.bottom, 72) // clear the floating search field in landscape
+                    .transition(.scale)
+                }
+                .padding()
+                .animation(searchContext.isTyping ? nil : .easeInOut, value: filteredApps)
 
                 VStack {
                     if LCUtils.appGroupUserDefault.bool(forKey: "LCStrictHiding") {
@@ -211,7 +152,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 
                                 ForEach(filteredHiddenApps, id: \.self) { app in
                                     LCAppBanner(appModel: app, delegate: self)
-                                        .frame(height: LCAppBannerRootView.bannerHeight)
                                 }
                                 .transition(.scale)
                                 
@@ -235,7 +175,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                             ForEach(filteredHiddenApps, id: \.self) { app in
                                 if sharedModel.isHiddenAppUnlocked {
                                     LCAppBanner(appModel: app, delegate: self)
-                                        .frame(height: LCAppBannerRootView.bannerHeight)
                                 } else {
                                     LCAppSkeletonBanner()
                                 }
@@ -250,7 +189,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     }
 
                     let appCount = sharedModel.isHiddenAppUnlocked ? filteredApps.count + filteredHiddenApps.count : filteredApps.count
-                    Text(appCount > 0 || searchContext.debouncedQuery != "" ? LCStr("strata.appList.appCounter", "%lld apps", appCount) : (sharedModel.multiLCStatus == 2 ? "lc.appList.convertToSharedToShowInLC2".loc : "lc.appList.installTip".loc))
+                    Text(appCount > 0 || searchContext.debouncedQuery != "" ? "lc.appList.appCounter %lld".localizeWithFormat(appCount) : (sharedModel.multiLCStatus == 2 ? "lc.appList.convertToSharedToShowInLC2".loc : "lc.appList.installTip".loc))
                         .padding(.horizontal)
                         .foregroundStyle(.gray)
                         .animation(searchContext.isTyping ? nil : .easeInOut, value: appCount)
@@ -264,26 +203,15 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 }
 
             }
-                }
-            }
-            .navigationBarHidden(!manageLibrary && !isNavigationActive)
             .navigationBarProgressBar(show:$installprogressVisible, progress: $installProgressPercentage)
             .coordinateSpace(name: "scroll")
             .onAppear {
-                StrataControlsLibrary.publish(launcherApps)
-                consumeControlsLaunch(); consumeResumeLaunch()
                 if !didAppear {
                     onAppear()
                 }
             }
             
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("StrataLaunchFromControls"))) { _ in consumeControlsLaunch() }
-            .onReceive(NotificationCenter.default.publisher(for: .strataOpenAppManagement)) { _ in manageLibrary = true }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                StrataControlsLibrary.publish(launcherApps); consumeControlsLaunch()
-            }
-            .onChange(of: launcherApps.map(liveBoardAppKey)) { _ in StrataControlsLibrary.publish(launcherApps); consumeControlsLaunch(); consumeResumeLaunch() }
-            .navigationTitle("LiveBoard")
+            .navigationTitle("lc.appList.myApps".loc)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if sharedModel.multiLCStatus != 2 {
@@ -503,10 +431,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 Task { await installFromUrl(urlStr: installUrl.absoluteString) }
             }
         }
-        .modifier { content in
-            if !manageLibrary { content }
-            else { content.searchable(text: $searchContext.query) }
-        }
+        .searchable(text: $searchContext.query)
 
     }
     
@@ -514,7 +439,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         NavigationView {
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue ? "Strata is connecting its built-in debugger. The app opens when attachment is confirmed; JIT setup can continue while you use it." : "lc.appBanner.waitForJitMsg".loc)
+                    Text("lc.appBanner.waitForJitMsg".loc)
                         .padding(.vertical)
                         .id(0)
                     
@@ -547,7 +472,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     } label: {
                         Text("lc.appBanner.jitLaunchNow".loc)
                     }
-                    .disabled(LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue)
                 }
             }
         }
@@ -560,106 +484,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         await openWebView(urlString: urlToOpen)
         
     }
-    /// Reopens the guest iOS terminated while it was in the background (one shot, max 6 hours old).
-    /// Uses the normal launch path so JIT, Game Mode and signing checks still apply.
-    @MainActor private func consumeResumeLaunch() {
-        let defaults = LCUtils.appGroupUserDefault
-        guard !sharedModel.registryLoading, let value = defaults.dictionary(forKey: "StrataResumeGuest") else { return }
-        guard let key = value["key"] as? String, let time = value["time"] as? Double else { defaults.removeObject(forKey: "StrataResumeGuest"); return }
-        guard let app = launcherApps.first(where: { liveBoardAppKey($0) == key }) else {
-            if Date().timeIntervalSince1970 - time > 60 { defaults.removeObject(forKey: "StrataResumeGuest") }
-            return
-        }
-        defaults.removeObject(forKey: "StrataResumeGuest")
-        let enabled = defaults.object(forKey: "StrataResumeAfterSystemClose") as? Bool ?? true
-        let age = Date().timeIntervalSince1970 - time
-        guard enabled, age >= 0, age < 6 * 3600 else { return }
-        Task { await launchFromLiveBoard(app) }
-    }
-    @MainActor private func consumeControlsLaunch() {
-        guard let command = StrataControlsLibrary.takeRequest(validKeys: launcherApps.map(liveBoardAppKey)),
-              let app = launcherApps.first(where: { liveBoardAppKey($0) == command.key }) else { return }
-        if command.close {
-            if #available(iOS 16.0, *), let folder = app.uiSelectedContainer?.folderName {
-                MultitaskDockManager.shared.closeAppFromControls(uuid: folder)
-            }
-        } else { Task { await launchFromLiveBoard(app) } }
-    }
-
-    @MainActor
-    func launchFromLiveBoard(_ app: LCAppModel, forceJIT: Bool = false, gameMode: Bool = false, multitask: Bool? = nil, metalHUD: Bool = false) async {
-        if app.appInfo is StrataSettingsAppInfo { NotificationCenter.default.post(name: .strataOpenSettings, object: nil); return }
-        // Recent apps for the card switcher, most recent first.
-        let recentKey = liveBoardAppKey(app)
-        var recents = LCUtils.appGroupUserDefault.stringArray(forKey: "StrataRecentApps") ?? []
-        recents.removeAll { $0 == recentKey }; recents.insert(recentKey, at: 0)
-        LCUtils.appGroupUserDefault.set(Array(recents.prefix(12)), forKey: "StrataRecentApps")
-        if let shortcut = app.appInfo as? StrataPhoneAppInfo {
-            do { try await phoneApps.open(shortcut.entryID) } catch { errorInfo = error.localizedDescription; errorShow = true }
-            return
-        }
-        StrataControlsLibrary.publish(launcherApps)
-        let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap { $0.windows }.first { $0.isKeyWindow }
-        LiveBoardOrientation.setLandscape(false, window: window)
-        if app.appInfo is BuiltInSideStoreAppInfo {
-            LCUtils.openSideStore(delegate: self)
-            return
-        }
-        // Games and Ports launch through the Game Mode path automatically (full screen, Game Mode metadata),
-        // unless the user explicitly asked for a multitask window.
-        let category = LiveBoardSharedCategories.category(forKey: liveBoardAppKey(app))
-        // With seamless switching, Game Mode already applies to Strata as a whole; keep games switchable.
-        let seamless = LCUtils.appGroupUserDefault.object(forKey: "StrataSeamlessSwitching") as? Bool ?? true
-        let automaticGameMode = !seamless && multitask != true && (category == "Games" || category == "Ports")
-        do {
-            try await app.launchFromLibrary(multitask: multitask, forceJIT: forceJIT, gameMode: gameMode || automaticGameMode, metalHUD: metalHUD)
-        } catch {
-            errorInfo = error.localizedDescription
-            errorShow = true
-        }
-    }
-
-    @MainActor
-    func ensureBundled32BitRuntime(for app: LCAppModel) async throws {
-        func usableRuntimes() -> [LCAppModel] {
-            sharedModel.apps.filter { runtime in
-                guard runtime.appInfo.is32bitEmulator, let folder = runtime.appInfo.relativeBundlePath,
-                      StrataRuntimeSelection.validFolder(folder), let path = runtime.appInfo.bundlePath(),
-                      let executable = Bundle(path: path)?.executableURL else { return false }
-                return FileManager.default.isReadableFile(atPath: executable.path)
-            }
-        }
-        func selectInstalled() async throws -> Bool {
-            let runtimes = usableRuntimes()
-            let candidates = runtimes.map { StrataRuntimeSelection.Candidate(folder: $0.appInfo.relativeBundlePath!, identifier: $0.bundleIdentifier, shared: $0.uiIsShared) }
-            guard let selected = StrataRuntimeSelection.choose(preferred: app.appInfo.selected32BitEmulator,
-                defaultRuntime: LCUtils.appGroupUserDefault.string(forKey: "LCSelected32BitEmulator"), candidates: candidates),
-                let runtime = runtimes.first(where: { $0.appInfo.relativeBundlePath == selected.folder && $0.uiIsShared == selected.shared }) else { return false }
-            try await runtime.signApp()
-            app.uiSelected32BitEmulator = selected.folder
-            if selected.identifier == "com.kdt.LiveExec32", (app.jitLaunchScriptJs ?? "").isEmpty {
-                app.jitLaunchScriptJs = LCUtils.base64EncodedUniversalJITScript()
-            }
-            // Keep a working global default; repair only a stale or missing one.
-            let current = LCUtils.appGroupUserDefault.string(forKey: "LCSelected32BitEmulator") ?? ""
-            if !candidates.contains(where: { $0.folder == current }) { LCUtils.appGroupUserDefault.set(selected.folder, forKey: "LCSelected32BitEmulator") }
-            return true
-        }
-        if try await selectInstalled() { return }
-        guard let bundled = Bundle.main.url(forResource: "LiveExec32", withExtension: "ipa", subdirectory: "BundledRuntime") else {
-            throw "The included LiveExec32 runtime is missing from this build.".loc
-        }
-        installprogressVisible = true
-        defer { installprogressVisible = false }
-        try await installIpaFile(bundled)
-        // The upstream installer publishes its registry update on the main queue.
-        for _ in 0..<20 {
-            if try await selectInstalled() { return }
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-        throw "LiveExec32 installation did not finish. Open Apps to check the runtime before retrying. JIT is still required for 32-bit apps.".loc
-    }
-
     func onAppear() {
         for app in sharedModel.apps {
             app.delegate = self
@@ -1133,33 +957,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    /// 主屏「删除 App」的落地实现：删掉 App 包本体，可选再清数据容器与钥匙串。
-    func uninstallLauncherApp(_ app: LCAppModel, removeData: Bool) {
-        guard !(app.appInfo is BuiltInSideStoreAppInfo),
-              !(app.appInfo is StrataPhoneAppInfo),
-              !(app.appInfo is StrataSettingsAppInfo) else { return }
-        let containers = app.appInfo.containers
-        do {
-            guard let bundlePath = app.appInfo.bundlePath() else {
-                throw CocoaError(.fileNoSuchFile)
-            }
-            let fileManager = FileManager.default
-            try fileManager.removeItem(atPath: bundlePath)
-            removeApp(app: app)
-
-            guard removeData, !containers.isEmpty else { return }
-            for container in containers {
-                let dataUUID = container.folderName
-                try? fileManager.removeItem(at: LCPath.dataPath.appendingPathComponent(dataUUID))
-                LCUtils.removeAppKeychain(dataUUID: dataUUID)
-                DataManager.shared.model.appDataFolderNames.removeAll { $0 == dataUUID }
-            }
-        } catch {
-            errorInfo = error.localizedDescription
-            errorShow = true
-        }
-    }
-    
     func changeAppVisibility(app: LCAppModel) {
         DispatchQueue.main.async {
             if app.appInfo.isHidden {
@@ -1264,13 +1061,10 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
         let enableJITTask = Task {
             
-            let success = await LCUtils.askForJIT(withScript: script, appName: appName, classicMode: classicMode) { newMsg in
+            let _ = await LCUtils.askForJIT(withScript: script, appName: appName, classicMode: classicMode) { newMsg in
                 Task { await MainActor.run {
                     self.jitLog += "\(newMsg)\n"
                 }}
-            }
-            if LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue, success {
-                jitAlert.close(result: true)
             }
             guard let _ = JITEnablerType(rawValue: LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType")) else {
                 return
@@ -1286,37 +1080,15 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     }
     
     func jitLaunch(withPID pid: Int, withScript script: String? = nil, appName: String) async {
-        if LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue {
-            jitLog = ""
-            let session = LiveBoardJITSession.shared
-            var handedOff = false
-            let started = session.startLaunch(pid: Int32(pid), script: script, onGuestAttached: {
-                handedOff = true
-                jitAlert.close(result: true)
-            }, progress: { message in jitLog += message + "\n" }, completion: { success in
-                if !handedOff {
-                    jitAlert.close(result: success)
-                    if !success { errorInfo = jitLog; errorShow = true }
-                } else if !success, #available(iOS 17.4, *), kill(Int32(pid), 0) == 0 {
-                    LCUtils.strataShowJITFailure(session.message, forPID: Int32(pid))
-                }
-            })
-            guard started else {
-                kill(Int32(pid), SIGKILL)
-                errorInfo = "Another built-in JIT operation is still running. Finish or cancel it in JIT setup first.".loc
-                errorShow = true
-                return
-            }
-            let completed = await jitAlert.open()
-            if completed != true { session.cancel(); kill(Int32(pid), SIGKILL) }
-            else if #available(iOS 17.4, *) { LCUtils.strataPresentFullscreenGuest(withPID: Int32(pid)) }
-            return
-        }
         await MainActor.run {
             let encodedData = script?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
                 
             
             if let jitEnabler = JITEnablerType(rawValue: LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType")) {
+                if jitEnabler == .BuiltIn {
+                    startBuiltInJIT(pid: pid, script: script)
+                    return
+                }
                 if jitEnabler == .StosDebug || jitEnabler == .StosDebugLC {
                     let encoded = encodedData.map { "&script=\($0)" } ?? ""
                     if jitEnabler == .StosDebugLC {
@@ -1328,7 +1100,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 Task { await openWebView(urlString: url.absoluteString) }
                             }
                         } else {
-                            errorInfo = "StosDebug is not found. Please install it first and switch it to shared app.".loc
+                            errorInfo = "StosDebug is not found. Please install it first and switch it to shared app."
                             errorShow = true
                             return
                         }
@@ -1349,7 +1121,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         }) {
                             Task { await openWebView(urlString: url.absoluteString) }
                         } else {
-                            errorInfo = "StikDebug is not found. Please install it first and switch it to shared app.".loc
+                            errorInfo = "StikDebug is not found. Please install it first and switch it to shared app."
                             errorShow = true
                             return
                         }
@@ -1358,6 +1130,23 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     }
                 }
             }
+        }
+    }
+
+    /// Built-in JIT keeps running after this returns; the guest waits for the
+    /// debugger on its own, and the modal only reports progress.
+    @MainActor
+    func startBuiltInJIT(pid: Int, script: String?) {
+        jitLog = ""
+        Task { @MainActor in
+            let enableTask = Task { @MainActor in
+                let succeeded = await LCBuiltInJIT.enable(pid: Int32(pid), script: script) { [self] line in
+                    jitLog += "\(line)\n"
+                }
+                if succeeded { jitAlert.close(result: true) }
+            }
+            let _ = await jitAlert.open()
+            enableTask.cancel()
         }
     }
 
@@ -1463,9 +1252,4 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
 
 extension View {
     func apply<V: View>(@ViewBuilder _ block: (Self) -> V) -> V { block(self) }
-}
-
-// Resolve once, before Home reconciles persisted dock/page placements.
-@MainActor private enum LiveBoardBundledApps {
-    static let sideStore: LCAppModel? = UserDefaults.sideStoreExist() ? LCAppModel(appInfo: BuiltInSideStoreAppInfo.shared) : nil
 }
