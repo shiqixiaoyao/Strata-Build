@@ -366,24 +366,6 @@ static void StrataPluginLog(NSString *format, ...) {
     }
 }
 
-// 微珠插件只读 LCLoadTweaksToSelf 这一个键来判断「当前进程是不是 LC 本体」。
-// 写 defaults 万一落进别的域（App Group / 扩展域 / 被同步覆盖）就读不到，所以再加一层
-// 定向替换：本进程内这个键的 boolForKey 恒为 YES，其它键原样透传。
-static BOOL (*StrataOriginalBoolForKey)(id, SEL, NSString *);
-static BOOL StrataForcedBoolForKey(id self, SEL _cmd, NSString *key) {
-    if ([key isEqualToString:@"LCLoadTweaksToSelf"]) return YES;
-    return StrataOriginalBoolForKey(self, _cmd, key);
-}
-static void StrataForceHostGate(void) {
-    static BOOL installed = NO;
-    if (installed) return;
-    installed = YES;
-    Method method = class_getInstanceMethod(NSUserDefaults.class, @selector(boolForKey:));
-    if (!method) return;
-    StrataOriginalBoolForKey = (BOOL (*)(id, SEL, NSString *))method_getImplementation(method);
-    method_setImplementation(method, (IMP)StrataForcedBoolForKey);
-}
-
 static id StrataClassValue(Class cls, NSString *selectorName) {
     SEL sel = NSSelectorFromString(selectorName);
     if (!cls || ![cls respondsToSelector:sel]) return nil;
@@ -444,13 +426,10 @@ static void StrataReportBuiltInPluginState(void) {
     }
 }
 
-// 内置宿主插件：两个 dylib 都以 constructor 自启动，所以 dlopen 之后不需要再调用入口。
+// 内置宿主插件：只有 LCGridLayout 还是独立 dylib（微珠/Orbit 已经编进 TweakLoader）。
 // 必须在 LiveContainerSwiftUI 框架加载之后执行，插件的宿主检测（NSClassFromString(@"LCUtils")）
 // 才找得到类。失败只记日志，不影响启动。
 static void StrataLoadBuiltInHostPlugins(void) {
-    NSArray<NSString *> *plugins = @[@"LCGridLayout", @"LCFloatingMenu"];
-    NSArray<NSString *> *keys = @[@"LCBuiltInGridLayoutEnabled", @"LCBuiltInFloatingMenuEnabled"];
-    NSString *frameworks = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
     [@"" writeToFile:StrataPluginLogPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
     StrataPluginLog(@"==== LiveContainer %@ (%@) ====",
                     lcMainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?",
@@ -460,44 +439,31 @@ static void StrataLoadBuiltInHostPlugins(void) {
     StrataPluginLog(@"LCLoadTweaksToSelf raw=%@ isSideStore=%d isLiveProcess=%d",
                     [lcUserDefaults objectForKey:@"LCLoadTweaksToSelf"], isSideStore, isLiveProcess);
     StrataPluginLog(@"guestAppInfo = %@", guestAppInfo ? @"set" : @"nil");
-    BOOL menuRequested = NO;
-    for (NSUInteger i = 0; i < plugins.count; i++) {
-        NSString *name = plugins[i];
-        NSString *settingsKey = keys[i];
-        if ([lcUserDefaults objectForKey:settingsKey] != nil && ![lcUserDefaults boolForKey:settingsKey]) {
-            StrataPluginLog(@"%@ 被设置关闭（%@）", name, settingsKey);
-            continue;
-        }
-        NSString *file = [frameworks stringByAppendingPathComponent:[name stringByAppendingString:@".dylib"]];
-        if (![NSFileManager.defaultManager fileExistsAtPath:file]) {
-            StrataPluginLog(@"%@ 缺失：%@", name, file);
-            continue;
-        }
-        if ([name isEqualToString:@"LCFloatingMenu"]) {
-            // 微珠只在自己被判成「被注入到 LC 本体」时才挂悬浮层：插件读 LCLoadTweaksToSelf
-            // 这个开发者开关判断当前进程是不是宿主（LCOrbitHost.isHostUI）。内置注入绕过了
-            // 上游那套「dylib 放进 Documents/Tweaks → TweakLoader 加载」的安装路径，没人写
-            // 这个键，插件就把自己当成 Guest，启动后直接什么都不做——之前两个包都带了 dylib
-            // 却看不到微珠就是这个原因。这里替它把键写上，插件才会进 host UI 分支。
-            [lcUserDefaults setBool:YES forKey:@"LCLoadTweaksToSelf"];
-            StrataForceHostGate();
-            StrataPluginLog(@"已写入 LCLoadTweaksToSelf=YES，回读=%@，已强制 boolForKey 返回 YES",
-                            [lcUserDefaults objectForKey:@"LCLoadTweaksToSelf"]);
-            menuRequested = YES;
-        }
+
+    // 微珠不在独立 dylib 里，靠 TweakLoader 带进来；这里只报告它有没有进来。
+    BOOL orbitLoaded = NSClassFromString(@"LCOrbitCore") != nil;
+    StrataPluginLog(@"Orbit via TweakLoader: %@ (LCOrbitCore %@)", orbitLoaded ? @"YES" : @"NO",
+                    orbitLoaded ? @"present" : @"MISSING");
+
+    NSString *frameworks = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
+    NSString *file = [frameworks stringByAppendingPathComponent:@"LCGridLayout.dylib"];
+    if ([lcUserDefaults objectForKey:@"LCBuiltInGridLayoutEnabled"] != nil &&
+        ![lcUserDefaults boolForKey:@"LCBuiltInGridLayoutEnabled"]) {
+        StrataPluginLog(@"LCGridLayout 被设置关闭");
+    } else if (![NSFileManager.defaultManager fileExistsAtPath:file]) {
+        StrataPluginLog(@"LCGridLayout 缺失：%@", file);
+    } else {
         NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:file error:nil];
         void *handle = dlopen(file.UTF8String, RTLD_LAZY);
         if (handle) {
-            StrataPluginLog(@"%@ dlopen OK（%llu bytes）", name, attributes.fileSize);
+            StrataPluginLog(@"LCGridLayout dlopen OK（%llu bytes）", attributes.fileSize);
         } else {
             const char *error = dlerror();
-            StrataPluginLog(@"%@ dlopen 失败：%@", name, error ? [NSString stringWithUTF8String:error] : @"unknown");
+            StrataPluginLog(@"LCGridLayout dlopen 失败：%@", error ? [NSString stringWithUTF8String:error] : @"unknown");
         }
     }
-    if (menuRequested) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{ StrataReportBuiltInPluginState(); });
-    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ StrataReportBuiltInPluginState(); });
 }
 
 static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContainer, int argc, char *argv[]) {
@@ -1129,12 +1095,14 @@ int LiveContainerMain(int argc, char *argv[]) {
         void* sideStoreHandle = dlopen("@executable_path/Frameworks/SideStoreSupport.framework/SideStoreSupport", RTLD_LAZY);
     }
 
-    // 内置微珠开着的时候跳过原生这次全量注入：上面为了点亮微珠已经把
-    // LCLoadTweaksToSelf 写成了 YES，而这一段会把这个键理解成「把 Documents/Tweaks
-    // 里的所有插件都塞进宿主」——既可能重复加载微珠，也可能让不兼容的插件把宿主搞崩。
-    // 微珠由内建加载器负责；用户关掉内置开关后才回到原生行为。
+    // 微珠和 Orbit 整套现在是编进 TweakLoader.dylib 的（和 v19 一致），所以宿主这边
+    // 只需要把 TweakLoader 载进来即可，不再单独 dlopen 一个 LCFloatingMenu.dylib。
+    // 内置微珠默认开：替用户把这个开发者开关写上，否则 TweakLoader 不会进宿主。
     BOOL builtInFloatingMenu = StrataBuiltInPluginEnabled(@"LCBuiltInFloatingMenuEnabled");
-    if ([lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"] && !builtInFloatingMenu) {
+    if (builtInFloatingMenu) {
+        [lcUserDefaults setBool:YES forKey:@"LCLoadTweaksToSelf"];
+    }
+    if ([lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"]) {
         NSString *tweakFolder = nil;
         if (isSharedBundle) {
             NSURL *appGroupPath = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:[LCSharedUtils appGroupID]];

@@ -7,6 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		17AA00000000000000000002 /* LCFloatingMenu.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000001 /* LCFloatingMenu.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000004 /* LCOrbitAutomaticPiP.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000003 /* LCOrbitAutomaticPiP.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000006 /* LCOrbitCore.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000005 /* LCOrbitCore.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000008 /* LCOrbitEventBus.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000007 /* LCOrbitEventBus.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000000A /* LCOrbitGitHub.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000009 /* LCOrbitGitHub.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000000C /* LCOrbitGuestService.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000000B /* LCOrbitGuestService.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000000E /* LCOrbitHost.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000000D /* LCOrbitHost.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000010 /* LCOrbitHostSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000000F /* LCOrbitHostSettings.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000012 /* LCOrbitLog.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000011 /* LCOrbitLog.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000014 /* LCOrbitLogViewer.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000013 /* LCOrbitLogViewer.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000016 /* LCOrbitMultitask.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000015 /* LCOrbitMultitask.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000018 /* LCOrbitOverlayManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000017 /* LCOrbitOverlayManager.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000001A /* LCOrbitPluginUpdater.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000019 /* LCOrbitPluginUpdater.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000001C /* LCOrbitSharedTweaksViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000001B /* LCOrbitSharedTweaksViewController.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000001E /* LCOrbitStorage.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000001D /* LCOrbitStorage.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000020 /* LCOrbitTweakAudit.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000001F /* LCOrbitTweakAudit.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000022 /* LCOrbitTweakCenter.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000021 /* LCOrbitTweakCenter.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000024 /* LCOrbitTweakCenterViews.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000023 /* LCOrbitTweakCenterViews.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000026 /* LCOrbitTweakSync.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000025 /* LCOrbitTweakSync.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000028 /* LCOrbitUpdateRelease.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000027 /* LCOrbitUpdateRelease.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
 		A15000000000000000000010 /* StosSign_API in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000020 /* StosSign_API */; };
 		A15000000000000000000011 /* StosSign_Auth in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000021 /* StosSign_Auth */; };
 		A15000000000000000000012 /* StosSign_Anisette in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000022 /* StosSign_Anisette */; };
@@ -159,6 +179,45 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		17AA00000000000000000001 /* LCFloatingMenu.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCFloatingMenu.m; sourceTree = "<group>"; };
+		17AA00000000000000000003 /* LCOrbitAutomaticPiP.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitAutomaticPiP.m; sourceTree = "<group>"; };
+		17AA00000000000000000005 /* LCOrbitCore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitCore.m; sourceTree = "<group>"; };
+		17AA00000000000000000007 /* LCOrbitEventBus.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitEventBus.m; sourceTree = "<group>"; };
+		17AA00000000000000000009 /* LCOrbitGitHub.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitGitHub.m; sourceTree = "<group>"; };
+		17AA0000000000000000000B /* LCOrbitGuestService.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitGuestService.m; sourceTree = "<group>"; };
+		17AA0000000000000000000D /* LCOrbitHost.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitHost.m; sourceTree = "<group>"; };
+		17AA0000000000000000000F /* LCOrbitHostSettings.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitHostSettings.m; sourceTree = "<group>"; };
+		17AA00000000000000000011 /* LCOrbitLog.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitLog.m; sourceTree = "<group>"; };
+		17AA00000000000000000013 /* LCOrbitLogViewer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitLogViewer.m; sourceTree = "<group>"; };
+		17AA00000000000000000015 /* LCOrbitMultitask.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitMultitask.m; sourceTree = "<group>"; };
+		17AA00000000000000000017 /* LCOrbitOverlayManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitOverlayManager.m; sourceTree = "<group>"; };
+		17AA00000000000000000019 /* LCOrbitPluginUpdater.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitPluginUpdater.m; sourceTree = "<group>"; };
+		17AA0000000000000000001B /* LCOrbitSharedTweaksViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitSharedTweaksViewController.m; sourceTree = "<group>"; };
+		17AA0000000000000000001D /* LCOrbitStorage.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitStorage.m; sourceTree = "<group>"; };
+		17AA0000000000000000001F /* LCOrbitTweakAudit.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakAudit.m; sourceTree = "<group>"; };
+		17AA00000000000000000021 /* LCOrbitTweakCenter.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakCenter.m; sourceTree = "<group>"; };
+		17AA00000000000000000023 /* LCOrbitTweakCenterViews.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakCenterViews.m; sourceTree = "<group>"; };
+		17AA00000000000000000025 /* LCOrbitTweakSync.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTweakSync.m; sourceTree = "<group>"; };
+		17AA00000000000000000027 /* LCOrbitUpdateRelease.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitUpdateRelease.m; sourceTree = "<group>"; };
+		17AA00000000000000000029 /* LCOrbitCore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitCore.h; sourceTree = "<group>"; };
+		17AA0000000000000000002A /* LCOrbitEventBus.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitEventBus.h; sourceTree = "<group>"; };
+		17AA0000000000000000002B /* LCOrbitGitHub.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitGitHub.h; sourceTree = "<group>"; };
+		17AA0000000000000000002C /* LCOrbitGuestService.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitGuestService.h; sourceTree = "<group>"; };
+		17AA0000000000000000002D /* LCOrbitHost.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitHost.h; sourceTree = "<group>"; };
+		17AA0000000000000000002E /* LCOrbitHostSettings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitHostSettings.h; sourceTree = "<group>"; };
+		17AA0000000000000000002F /* LCOrbitLog.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitLog.h; sourceTree = "<group>"; };
+		17AA00000000000000000030 /* LCOrbitLogViewer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitLogViewer.h; sourceTree = "<group>"; };
+		17AA00000000000000000031 /* LCOrbitModule.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitModule.h; sourceTree = "<group>"; };
+		17AA00000000000000000032 /* LCOrbitMultitask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitMultitask.h; sourceTree = "<group>"; };
+		17AA00000000000000000033 /* LCOrbitOverlayManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitOverlayManager.h; sourceTree = "<group>"; };
+		17AA00000000000000000034 /* LCOrbitPluginUpdater.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitPluginUpdater.h; sourceTree = "<group>"; };
+		17AA00000000000000000035 /* LCOrbitSharedTweaksViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitSharedTweaksViewController.h; sourceTree = "<group>"; };
+		17AA00000000000000000036 /* LCOrbitStorage.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitStorage.h; sourceTree = "<group>"; };
+		17AA00000000000000000037 /* LCOrbitTweakAudit.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTweakAudit.h; sourceTree = "<group>"; };
+		17AA00000000000000000038 /* LCOrbitTweakCenter.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTweakCenter.h; sourceTree = "<group>"; };
+		17AA00000000000000000039 /* LCOrbitTweakCenterViews.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTweakCenterViews.h; sourceTree = "<group>"; };
+		17AA0000000000000000003A /* LCOrbitTweakSync.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTweakSync.h; sourceTree = "<group>"; };
+		17AA0000000000000000003B /* LCOrbitUpdateRelease.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitUpdateRelease.h; sourceTree = "<group>"; };
 		172978E8302EAF07004A3E78 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		172CA8542D9D721700CF6989 /* dyld_bypass_validation.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = dyld_bypass_validation.m; sourceTree = "<group>"; };
 		172CA8552D9D721700CF6989 /* FoundationPrivate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FoundationPrivate.h; sourceTree = "<group>"; };
@@ -419,6 +478,52 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		17AA0000000000000000003C /* Orbit */ = {
+			isa = PBXGroup;
+			children = (
+				17AA00000000000000000001 /* LCFloatingMenu.m */,
+				17AA00000000000000000003 /* LCOrbitAutomaticPiP.m */,
+				17AA00000000000000000005 /* LCOrbitCore.m */,
+				17AA00000000000000000007 /* LCOrbitEventBus.m */,
+				17AA00000000000000000009 /* LCOrbitGitHub.m */,
+				17AA0000000000000000000B /* LCOrbitGuestService.m */,
+				17AA0000000000000000000D /* LCOrbitHost.m */,
+				17AA0000000000000000000F /* LCOrbitHostSettings.m */,
+				17AA00000000000000000011 /* LCOrbitLog.m */,
+				17AA00000000000000000013 /* LCOrbitLogViewer.m */,
+				17AA00000000000000000015 /* LCOrbitMultitask.m */,
+				17AA00000000000000000017 /* LCOrbitOverlayManager.m */,
+				17AA00000000000000000019 /* LCOrbitPluginUpdater.m */,
+				17AA0000000000000000001B /* LCOrbitSharedTweaksViewController.m */,
+				17AA0000000000000000001D /* LCOrbitStorage.m */,
+				17AA0000000000000000001F /* LCOrbitTweakAudit.m */,
+				17AA00000000000000000021 /* LCOrbitTweakCenter.m */,
+				17AA00000000000000000023 /* LCOrbitTweakCenterViews.m */,
+				17AA00000000000000000025 /* LCOrbitTweakSync.m */,
+				17AA00000000000000000027 /* LCOrbitUpdateRelease.m */,
+				17AA00000000000000000029 /* LCOrbitCore.h */,
+				17AA0000000000000000002A /* LCOrbitEventBus.h */,
+				17AA0000000000000000002B /* LCOrbitGitHub.h */,
+				17AA0000000000000000002C /* LCOrbitGuestService.h */,
+				17AA0000000000000000002D /* LCOrbitHost.h */,
+				17AA0000000000000000002E /* LCOrbitHostSettings.h */,
+				17AA0000000000000000002F /* LCOrbitLog.h */,
+				17AA00000000000000000030 /* LCOrbitLogViewer.h */,
+				17AA00000000000000000031 /* LCOrbitModule.h */,
+				17AA00000000000000000032 /* LCOrbitMultitask.h */,
+				17AA00000000000000000033 /* LCOrbitOverlayManager.h */,
+				17AA00000000000000000034 /* LCOrbitPluginUpdater.h */,
+				17AA00000000000000000035 /* LCOrbitSharedTweaksViewController.h */,
+				17AA00000000000000000036 /* LCOrbitStorage.h */,
+				17AA00000000000000000037 /* LCOrbitTweakAudit.h */,
+				17AA00000000000000000038 /* LCOrbitTweakCenter.h */,
+				17AA00000000000000000039 /* LCOrbitTweakCenterViews.h */,
+				17AA0000000000000000003A /* LCOrbitTweakSync.h */,
+				17AA0000000000000000003B /* LCOrbitUpdateRelease.h */,
+			);
+			path = Orbit;
+			sourceTree = "<group>";
+		};
 		172CA85F2D9D721700CF6989 /* LiveContainer */ = {
 			isa = PBXGroup;
 			children = (
@@ -465,6 +570,7 @@
 				172CA85F2D9D721700CF6989 /* LiveContainer */,
 				17413FB62D9C0BAE00F3F928 /* LiveContainerSwiftUI */,
 				174140162D9C0C1B00F3F928 /* TweakLoader */,
+				17AA0000000000000000003C /* Orbit */,
 				174140552D9C0D6D00F3F928 /* ZSign */,
 				174140AE2D9C0F4100F3F928 /* TestJITLess */,
 				E1292AE72DCA3A660065E12D /* LiveProcess */,
@@ -981,6 +1087,26 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				17AA00000000000000000002 /* LCFloatingMenu.m in Sources */,
+				17AA00000000000000000004 /* LCOrbitAutomaticPiP.m in Sources */,
+				17AA00000000000000000006 /* LCOrbitCore.m in Sources */,
+				17AA00000000000000000008 /* LCOrbitEventBus.m in Sources */,
+				17AA0000000000000000000A /* LCOrbitGitHub.m in Sources */,
+				17AA0000000000000000000C /* LCOrbitGuestService.m in Sources */,
+				17AA0000000000000000000E /* LCOrbitHost.m in Sources */,
+				17AA00000000000000000010 /* LCOrbitHostSettings.m in Sources */,
+				17AA00000000000000000012 /* LCOrbitLog.m in Sources */,
+				17AA00000000000000000014 /* LCOrbitLogViewer.m in Sources */,
+				17AA00000000000000000016 /* LCOrbitMultitask.m in Sources */,
+				17AA00000000000000000018 /* LCOrbitOverlayManager.m in Sources */,
+				17AA0000000000000000001A /* LCOrbitPluginUpdater.m in Sources */,
+				17AA0000000000000000001C /* LCOrbitSharedTweaksViewController.m in Sources */,
+				17AA0000000000000000001E /* LCOrbitStorage.m in Sources */,
+				17AA00000000000000000020 /* LCOrbitTweakAudit.m in Sources */,
+				17AA00000000000000000022 /* LCOrbitTweakCenter.m in Sources */,
+				17AA00000000000000000024 /* LCOrbitTweakCenterViews.m in Sources */,
+				17AA00000000000000000026 /* LCOrbitTweakSync.m in Sources */,
+				17AA00000000000000000028 /* LCOrbitUpdateRelease.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

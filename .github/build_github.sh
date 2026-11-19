@@ -7,7 +7,8 @@ brew install ldid
 mv "$archive_path.xcarchive/Products/Applications" Payload
 
 # --- Built-in host plugins ---------------------------------------------------
-# LCGridLayout / LCFloatingMenu 随包分发，启动时由 LCBootstrap dlopen 进宿主进程。
+# LCGridLayout 随包分发，启动时由 LCBootstrap dlopen 进宿主进程。
+# 微珠（LCFloatingMenu）与 Orbit 整套编在 TweakLoader.dylib 里，和 v19 一致。
 if [ -d "BuiltInPlugins" ]; then
   for dylib in BuiltInPlugins/*.dylib; do
     [ -f "$dylib" ] || continue
@@ -103,7 +104,7 @@ sign_app_groups() {
 sign_app_groups
 
 sign_builtin_plugins() {
-  for dylib in LCGridLayout LCFloatingMenu; do
+  for dylib in LCGridLayout; do
     target="Payload/LiveContainer.app/Frameworks/$dylib.dylib"
     [ -f "$target" ] || continue
     # 注意 -S"" 与路径之间必须有空格：写成 -S"$target" 会被 ldid 当成

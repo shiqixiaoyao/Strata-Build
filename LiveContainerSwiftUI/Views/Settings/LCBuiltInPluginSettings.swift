@@ -23,7 +23,7 @@ struct LCBuiltInPluginSettings: View {
             } header: {
                 Text("Built-in plugins".loc)
             } footer: {
-                Text("Both plugins are injected into LiveContainer itself and only take effect after a full restart. The grid replaces the app list; the floating menu adds a side notch.".loc)
+                Text("The grid is injected into LiveContainer itself. The floating menu ships inside TweakLoader, so it appears both in LiveContainer and inside every app it launches. Changing either switch takes effect after a full restart.".loc)
             }
 
             Section {
@@ -48,7 +48,7 @@ struct LCBuiltInPluginSettings: View {
             } header: {
                 Text("内置插件诊断")
             } footer: {
-                Text("记录每个内置 dylib 的加载结果、微珠插件自己的宿主判定，以及启动 3 秒后屏幕上有没有它的窗口。每次启动重写。")
+                Text("记录内置 dylib 的加载结果、TweakLoader 里有没有 Orbit、微珠的宿主判定，以及启动 3 秒后屏幕上有没有它的窗口。每次启动重写。")
             }
         }
         .navigationTitle("Built-in plugins".loc)
