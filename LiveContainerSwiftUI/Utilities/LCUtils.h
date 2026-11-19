@@ -29,6 +29,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 // Built-in JIT helper: a second extension process owns the debugger connection,
 // because a process cannot attach a debugger to itself.
 + (BOOL)strataCanDebug;
++ (NSDictionary *)strataMemoryStatus;
 + (NSObject *)strataStartJITHelper:(NSDictionary *)payload error:(NSError **)error;
 + (void)strataStopJITHelper:(NSObject *)helper;
 

@@ -33417,6 +33417,486 @@
           }
         }
       }
+    },
+    "strata.memory.availableAtSample": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "采样时运行中 App 可用：%llu MB"
+          }
+        }
+      }
+    },
+    "strata.memory.availableNow": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strata 当前可用：%llu MB"
+          }
+        }
+      }
+    },
+    "strata.memory.usedAtSample": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "采样时运行中 App 已用：%llu MB"
+          }
+        }
+      }
+    },
+    "strata.memory.completedCount": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成 %lld / %lld 项请求。"
+          }
+        }
+      }
+    },
+    "strata.memory.guestPrefix": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "访客进程："
+          }
+        }
+      }
+    },
+    "strata.memory.hostPrefix": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strata："
+          }
+        }
+      }
+    },
+    "strata.memory.noExactMatch": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有完全匹配的注册项：%@。请在下方 SideStore 的 App ID 列表中选择对应的 ID。尚未更改任何权限。"
+          }
+        }
+      }
+    },
+    "strata.memory.sampledAt": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "采样时间：%@"
+          }
+        }
+      }
+    },
+    "strata.memory.signedGuest": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已签名访客 ID：%@"
+          }
+        }
+      }
+    },
+    "strata.memory.signedHost": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已签名 Strata ID：%@"
+          }
+        }
+      }
+    },
+    "Installed memory permissions": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装的内存权限"
+          }
+        }
+      }
+    },
+    "Strata: extra memory allowed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strata：已获扩展内存"
+          }
+        }
+      }
+    },
+    "Strata: standard memory permission": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strata：标准内存权限"
+          }
+        }
+      }
+    },
+    "Guest process: extra memory requested in signature": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "访客进程：签名中已申请扩展内存"
+          }
+        }
+      }
+    },
+    "Guest process: standard memory signature": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "访客进程：标准内存签名"
+          }
+        }
+      }
+    },
+    "Refresh status": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新状态"
+          }
+        }
+      }
+    },
+    "Latest running-app memory sample": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新的运行中 App 内存采样"
+          }
+        }
+      }
+    },
+    "Normal launch: runs inside Strata's process": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "普通启动：在 Strata 的进程内运行"
+          }
+        }
+      }
+    },
+    "Runs in a separate guest process": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在单独的访客进程中运行"
+          }
+        }
+      }
+    },
+    "Running process: extra memory entitlement present": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行进程：存在扩展内存权限"
+          }
+        }
+      }
+    },
+    "Running process: standard memory entitlement": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行进程：标准内存权限"
+          }
+        }
+      }
+    },
+    "iOS did not report memory headroom for this process.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS 未返回此进程的内存余量。"
+          }
+        }
+      }
+    },
+    "Copy app memory report": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制 App 内存报告"
+          }
+        }
+      }
+    },
+    "This is a saved sample from the process running the app, not a live reservation or a fixed memory limit. Samples update every five seconds while that process can run.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这是运行该 App 的进程保存的一次采样数据，并非实时预留量，也不是固定的内存上限。该进程运行期间，样本每五秒更新一次。"
+          }
+        }
+      }
+    },
+    "SideStore anisette server (HTTPS)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SideStore anisette 服务器（HTTPS）"
+          }
+        }
+      }
+    },
+    "Signing Apple ID": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "签名用 Apple ID"
+          }
+        }
+      }
+    },
+    "Password": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "密码"
+          }
+        }
+      }
+    },
+    "Sign in to Apple": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登录 Apple"
+          }
+        }
+      }
+    },
+    "Strata registration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strata 注册"
+          }
+        }
+      }
+    },
+    "Guest-process registration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "访客进程注册"
+          }
+        }
+      }
+    },
+    "Choose registration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择注册"
+          }
+        }
+      }
+    },
+    "Select only the Strata and LiveProcess IDs belonging to your SideStore installation. If SideStore uses one shared registration for both, select it in both fields. No IDs are created or changed until you tap Apply.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请仅选择属于你 SideStore 安装的 Strata 与 LiveProcess 的 ID。如果 SideStore 对两者使用同一个共享注册，请在两个字段中都选择它。在你点击“应用”之前，不会创建或更改任何 ID。"
+          }
+        }
+      }
+    },
+    "Apply extra memory to selected registrations": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "为所选注册应用扩展内存"
+          }
+        }
+      }
+    },
+    "Sign out": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出登录"
+          }
+        }
+      }
+    },
+    "Working…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "处理中…"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
+    "Enable extra memory": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用扩展内存"
+          }
+        }
+      }
+    },
+    "Use the same Apple ID and trusted anisette server as SideStore. Credentials stay in memory for this session. After applying, reinstall through SideStore and keep all extensions. iOS decides the memory available on your device.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请使用与 SideStore 相同的 Apple ID 和受信任的 anisette 服务器。凭据仅保存在本次会话的内存中。应用后，请通过 SideStore 重新安装并保留所有扩展。设备实际可用的内存由 iOS 决定。"
+          }
+        }
+      }
+    },
+    "Memory": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存"
+          }
+        }
+      }
+    },
+    "Memory and signing permissions": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存与签名权限"
+          }
+        }
+      }
+    },
+    "Apple verification code": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 验证码"
+          }
+        }
+      }
+    },
+    "6-digit code": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "6 位验证码"
+          }
+        }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
+          }
+        }
+      }
+    },
+    "Enter the verification code Apple sent to your trusted device.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入 Apple 发送到你受信任设备的验证码。"
+          }
+        }
+      }
+    },
+    "Built-in plugins": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内置插件"
+          }
+        }
+      }
+    },
+    "Icon grid": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图标网格"
+          }
+        }
+      }
+    },
+    "Floating menu": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "悬浮菜单"
+          }
+        }
+      }
+    },
+    "Both plugins are injected into LiveContainer itself and only take effect after a full restart. The grid replaces the app list; the floating menu adds a side notch.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "两个插件都注入到 LiveContainer 自身，完全重启后生效。网格会替换应用列表，悬浮菜单会在屏幕边缘加一个侧边刘海。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

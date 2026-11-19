@@ -251,6 +251,22 @@ struct LCSettingsView: View {
                     Text("lc.settings.silentOpenWebPageDesc".loc)
                 }
                 
+                Section {
+                    NavigationLink {
+                        StrataMemorySettings()
+                    } label: {
+                        Label("Memory and signing permissions".loc, systemImage: "memorychip")
+                    }
+                }
+                
+                Section {
+                    NavigationLink {
+                        LCBuiltInPluginSettings()
+                    } label: {
+                        Label("Built-in plugins".loc, systemImage: "puzzlepiece.extension")
+                    }
+                }
+                
                 if sharedModel.isHiddenAppUnlocked {
                     Section {
                         Toggle(isOn: $strictHiding) {

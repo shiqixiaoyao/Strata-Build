@@ -4,6 +4,7 @@
 @import UniformTypeIdentifiers;
 @import Security;
 #import <IOKit/IOKitLib.h>
+#import <os/proc.h>
 
 #import "LCUtils.h"
 #import "../../LiveContainer/LCSharedUtils.h"
@@ -50,6 +51,36 @@ extern CFTypeRef SecTaskCopyValueForEntitlement(void *task, CFStringRef key, CFE
 
 + (void)strataStopJITHelper:(NSObject *)helper {
     if ([helper isKindOfClass:NSExtension.class]) [(NSExtension *)helper _kill:0];
+}
+
++ (NSDictionary *)strataMemoryStatus {
+    void *task = SecTaskCreateFromSelf(NULL);
+    BOOL (^flag)(NSString *) = ^BOOL(NSString *key) {
+        if (!task) return NO;
+        CFTypeRef value = SecTaskCopyValueForEntitlement(task, (__bridge CFStringRef)key, NULL);
+        BOOL enabled = value && CFEqual(value, kCFBooleanTrue);
+        if (value) CFRelease(value);
+        return enabled;
+    };
+    NSString *memoryKey = @"com.apple.developer.kernel.increased-memory-limit";
+    NSString *addressKey = @"com.apple.developer.kernel.extended-virtual-addressing";
+    BOOL hostMemory = flag(memoryKey), hostAddress = flag(addressKey);
+    CFTypeRef signedIDValue = task ? SecTaskCopyValueForEntitlement(task, CFSTR("application-identifier"), NULL) : NULL;
+    NSString *hostSignedID = signedIDValue && CFGetTypeID(signedIDValue) == CFStringGetTypeID() ? [(__bridge NSString *)signedIDValue copy] : @"";
+    if (signedIDValue) CFRelease(signedIDValue);
+    if (task) CFRelease(task);
+    NSBundle *guest = [NSBundle bundleWithPath:[NSBundle.mainBundle.builtInPlugInsPath stringByAppendingPathComponent:@"LiveProcess.appex"]];
+    NSString *xml = guest.executablePath ? getExecutableEntitlementXML(guest.executablePath) : nil;
+    NSDictionary *entitlements = xml ? [NSPropertyListSerialization propertyListWithData:[xml dataUsingEncoding:NSUTF8StringEncoding] options:0 format:nil error:nil] : nil;
+    NSURL *root = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:[LCSharedUtils appGroupID]];
+    NSData *sampleData = root ? [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:@"Library/StrataDiagnostics/guest-memory.json"]] : nil;
+    NSDictionary *sample = sampleData ? [NSJSONSerialization JSONObjectWithData:sampleData options:0 error:nil] : nil;
+    if (![sample isKindOfClass:NSDictionary.class] || ![sample[@"schema"] isEqual:@1]) sample = @{};
+    return @{@"guestSample":sample, @"hostMemory":@(hostMemory), @"hostAddress":@(hostAddress),
+        @"guestMemory":@([entitlements[memoryKey] boolValue]), @"guestAddress":@([entitlements[addressKey] boolValue]),
+        @"hostSignedID":hostSignedID, @"guestSignedID":[entitlements[@"application-identifier"] isKindOfClass:NSString.class] ? entitlements[@"application-identifier"] : @"",
+        @"guestID":guest.bundleIdentifier ?: @"", @"teamID":[LCSharedUtils teamIdentifier] ?: @"",
+        @"availableMB":@(os_proc_available_memory() / (1024 * 1024)), @"physicalMB":@(NSProcessInfo.processInfo.physicalMemory / (1024 * 1024))};
 }
 #pragma mark Certificate & password
 

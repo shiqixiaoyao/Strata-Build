@@ -246,9 +246,10 @@ class LCAppModel: ObservableObject, Hashable {
         
         let classicMode = appInfo.defaultClassicMode
         let multitask = classicMode == 0 ? (multitask ?? shouldLaunchInMultitaskMode) : false
+        // 只有真正需要 JIT 的 App 才走 guest scene。之前这里只看 enabler 类型，
+        // 于是选了「内置」之后所有 App 都被塞进多任务宿主，设置里的默认多任务还显示关闭。
         let builtInJIT = LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType") == JITEnablerType.BuiltIn.rawValue
-        // Built-in JIT can only attach to another process, so this launch always takes
-        // the guest-scene path even when the app would normally run in-process.
+            && (forceJIT ?? (appInfo.isJITNeeded || appInfo.is32bit))
         var guestSceneLaunch = multitask
         if #available(iOS 17.4, *), builtInJIT { guestSceneLaunch = true }
         

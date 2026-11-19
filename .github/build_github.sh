@@ -6,6 +6,16 @@ brew install ldid
 # move lc to working folder
 mv "$archive_path.xcarchive/Products/Applications" Payload
 
+# --- Built-in host plugins ---------------------------------------------------
+# LCGridLayout / LCFloatingMenu 随包分发，启动时由 LCBootstrap 注入宿主进程。
+# 上游 release 里的 SideStoreTranslator 与 zh-Hans.json 不进来。
+if [ -d "BuiltInPlugins" ]; then
+  for dylib in BuiltInPlugins/*.dylib; do
+    [ -f "$dylib" ] || continue
+    cp "$dylib" "Payload/LiveContainer.app/Frameworks/$(basename "$dylib")"
+  done
+fi
+
 # --- Built-in JIT helper ----------------------------------------------------
 # A second extension process is the only way to hold a debugger connection: a
 # process cannot attach a debugger to itself. The helper is the share extension
@@ -82,6 +92,16 @@ sign_app_groups() {
 }
 
 sign_app_groups
+
+sign_builtin_plugins() {
+  for dylib in LCGridLayout LCFloatingMenu; do
+    target="Payload/LiveContainer.app/Frameworks/$dylib.dylib"
+    [ -f "$target" ] || continue
+    ldid -S"$target"
+  done
+}
+
+sign_builtin_plugins
 
 # temporarily move sidestore support framrwork to tmp before zip
 mkdir tmp
