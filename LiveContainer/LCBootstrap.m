@@ -329,6 +329,35 @@ NSString *LCRunGuestExtension(NSDictionary *request, int argc, char *argv[], cha
     return nil;
 }
 
+// 内置宿主插件：两个 dylib 都以 constructor 自启动，所以 dlopen 之后不需要再调用入口。
+// 必须在 LiveContainerSwiftUI 框架加载之后执行，插件的宿主检测（NSClassFromString(@"LCUtils")）
+// 才找得到类。失败只记日志，不影响启动。
+static void StrataLoadBuiltInHostPlugins(void) {
+    NSArray<NSString *> *plugins = @[@"LCGridLayout", @"LCFloatingMenu"];
+    NSArray<NSString *> *keys = @[@"LCBuiltInGridLayoutEnabled", @"LCBuiltInFloatingMenuEnabled"];
+    NSString *frameworks = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
+    for (NSUInteger i = 0; i < plugins.count; i++) {
+        NSString *name = plugins[i];
+        NSString *settingsKey = keys[i];
+        if ([lcUserDefaults objectForKey:settingsKey] != nil && ![lcUserDefaults boolForKey:settingsKey]) {
+            NSLog(@"[LC] built-in plugin disabled by setting: %@", name);
+            continue;
+        }
+        NSString *file = [frameworks stringByAppendingPathComponent:[name stringByAppendingString:@".dylib"]];
+        if (![NSFileManager.defaultManager fileExistsAtPath:file]) {
+            NSLog(@"[LC] built-in plugin missing: %@", file);
+            continue;
+        }
+        void *handle = dlopen(file.UTF8String, RTLD_LAZY);
+        if (handle) {
+            NSLog(@"[LC] built-in plugin loaded: %@", name);
+        } else {
+            const char *error = dlerror();
+            NSLog(@"[LC] built-in plugin failed: %@ (%@)", name, error ? [NSString stringWithUTF8String:error] : @"unknown");
+        }
+    }
+}
+
 static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContainer, int argc, char *argv[]) {
     NSString *appError = nil;
     if([[lcUserDefaults objectForKey:@"LCWaitForDebugger"] boolValue]) {
@@ -976,38 +1005,10 @@ int LiveContainerMain(int argc, char *argv[]) {
     }
 
     
-// 内置宿主插件：两个 dylib 都以 constructor 自启动，所以 dlopen 之后不需要再调用入口。
-// 必须在 LiveContainerSwiftUI 框架加载之后执行，插件的宿主检测（NSClassFromString(@"LCUtils")）
-// 才找得到类。失败只记日志，不影响启动。
-static void StrataLoadBuiltInHostPlugins(void) {
-    NSArray<NSString *> *plugins = @[@"LCGridLayout", @"LCFloatingMenu"];
-    NSArray<NSString *> *keys = @[@"LCBuiltInGridLayoutEnabled", @"LCBuiltInFloatingMenuEnabled"];
-    NSString *frameworks = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
-    for (NSUInteger i = 0; i < plugins.count; i++) {
-        NSString *name = plugins[i];
-        NSString *settingsKey = keys[i];
-        if ([lcUserDefaults objectForKey:settingsKey] != nil && ![lcUserDefaults boolForKey:settingsKey]) {
-            NSLog(@"[LC] built-in plugin disabled by setting: %@", name);
-            continue;
-        }
-        NSString *file = [frameworks stringByAppendingPathComponent:[name stringByAppendingString:@".dylib"]];
-        if (![NSFileManager.defaultManager fileExistsAtPath:file]) {
-            NSLog(@"[LC] built-in plugin missing: %@", file);
-            continue;
-        }
-        void *handle = dlopen(file.UTF8String, RTLD_LAZY);
-        if (handle) {
-            NSLog(@"[LC] built-in plugin loaded: %@", name);
-        } else {
-            const char *error = dlerror();
-            NSLog(@"[LC] built-in plugin failed: %@ (%@)", name, error ? [NSString stringWithUTF8String:error] : @"unknown");
-        }
-    }
-}
 
     StrataLoadBuiltInHostPlugins();
 
-int (*LiveContainerSwiftUIMain)(void) = dlsym(LiveContainerSwiftUIHandle, "main");
+    int (*LiveContainerSwiftUIMain)(void) = dlsym(LiveContainerSwiftUIHandle, "main");
     return LiveContainerSwiftUIMain();
 
 }
