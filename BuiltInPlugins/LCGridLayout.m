@@ -576,27 +576,7 @@ static void LGCollectSearchFields(UIView *view, UIView *skip, NSMutableArray<NSV
         [self refresh];
         return;
     }
-    NSString *scheme = LGGet(NSClassFromString(@"LCUtils"), @"appUrlScheme");
-    if (![scheme isKindOfClass:NSString.class] || scheme.length == 0) {
-        LGLog(@"Launch refused: no native URL scheme");
-        [self showError:@"LiveContainer 没有提供启动用的 URL scheme，无法从这个网格启动应用。请改用原生列表。"];
-        return;
-    }
-    NSURLComponents *components = [NSURLComponents new];
-    components.scheme = scheme;
-    components.host = @"livecontainer-launch";
-    components.queryItems = @[[NSURLQueryItem queryItemWithName:@"bundle-name" value:entry.folder]];
-    NSURL *url = components.URL;
-    if (!url) return;
-    [self.view endEditing:YES];
-    [UIApplication.sharedApplication openURL:url options:@{} completionHandler:^(BOOL success) {
-        LGLog(success ? @"Native launch URL accepted (guest launch outcome not asserted)" : @"Native launch URL rejected");
-        if (!success) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self showError:@"系统拒绝了启动请求。请改用原生列表，并查看 LCGridLayout.log。"];
-            });
-        }
-    }];
+    [self launchEntry:entry];
 }
 - (void)showError:(NSString *)message {
     if (self.presentedViewController) return;
@@ -749,12 +729,137 @@ static void LGCollectSearchFields(UIView *view, UIView *skip, NSMutableArray<NSV
         }
     }
 }
+- (NSString *)containerForEntry:(LGEntry *)entry {
+    NSArray<NSString *> *containers = [self containerFoldersForEntry:entry];
+    if (containers.count == 0) return nil;
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:[@"LCGridLayout.container." stringByAppendingString:entry.folder]];
+    if (saved.length && [containers containsObject:saved]) return saved;
+    return containers.firstObject;
+}
+
+- (NSURL *)launchURLForEntry:(LGEntry *)entry container:(NSString *)container {
+    NSString *scheme = LGGet(NSClassFromString(@"LCUtils"), @"appUrlScheme");
+    if (![scheme isKindOfClass:NSString.class] || scheme.length == 0) return nil;
+    NSURLComponents *components = [NSURLComponents new];
+    components.scheme = scheme;
+    components.host = @"livecontainer-launch";
+    NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray arrayWithObject:
+        [NSURLQueryItem queryItemWithName:@"bundle-name" value:entry.folder]];
+    if (container.length) {
+        [items addObject:[NSURLQueryItem queryItemWithName:@"container-folder-name" value:container]];
+    }
+    components.queryItems = items;
+    return components.URL;
+}
+
+- (void)launchEntry:(LGEntry *)entry {
+    NSURL *url = [self launchURLForEntry:entry container:[self containerForEntry:entry]];
+    if (!url) {
+        LGLog(@"Launch refused: no native URL scheme");
+        [self showError:@"LiveContainer 没有提供启动用的 URL scheme，无法从这个网格启动应用。请改用原生列表。"];
+        return;
+    }
+    [self.view endEditing:YES];
+    [UIApplication.sharedApplication openURL:url options:@{} completionHandler:^(BOOL success) {
+        LGLog(success ? @"Native launch URL accepted (guest launch outcome not asserted)" : @"Native launch URL rejected");
+        if (!success) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showError:@"系统拒绝了启动请求。请改用原生列表，并查看 LCGridLayout.log。"];
+            });
+        }
+    }];
+}
+
+- (NSURL *)dataFolderForContainer:(NSString *)container {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSMutableArray<NSURL *> *roots = [NSMutableArray array];
+    NSURL *docs = [fm URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].lastObject;
+    if (docs) [roots addObject:[docs URLByAppendingPathComponent:@"Data/Application"]];
+    id group = LGGet(NSClassFromString(@"LCSharedUtils"), @"appGroupPath");
+    if (![group isKindOfClass:NSURL.class]) {
+        group = [fm containerURLForSecurityApplicationGroupIdentifier:@"group.com.SideStore.SideStore"];
+    }
+    if ([group isKindOfClass:NSURL.class]) {
+        [roots addObject:[(NSURL *)group URLByAppendingPathComponent:@"LiveContainer/Data/Application"]];
+    }
+    if (container.length) {
+        for (NSURL *root in roots) {
+            NSURL *candidate = [root URLByAppendingPathComponent:container];
+            if ([fm fileExistsAtPath:candidate.path]) return candidate;
+        }
+    }
+    return roots.firstObject;
+}
+
+- (void)openDataFolderForEntry:(LGEntry *)entry {
+    NSURL *folder = [self dataFolderForContainer:[self containerForEntry:entry]];
+    if (!folder) {
+        [self showAlertTitle:@"没有数据目录" message:@"这个应用还没有创建过容器。先启动一次，或在原生列表里选择容器。"];
+        return;
+    }
+    NSString *escaped = [folder.path stringByAddingPercentEncodingWithAllowedCharacters:
+        NSCharacterSet.URLPathAllowedCharacterSet];
+    NSURL *url = [NSURL URLWithString:[@"shareddocuments://" stringByAppendingString:escaped ?: @""]];
+    if (!url) return;
+    [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+}
+
+- (void)copyLaunchURLForEntry:(LGEntry *)entry {
+    NSURL *url = [self launchURLForEntry:entry container:[self containerForEntry:entry]];
+    if (!url) {
+        [self showAlertTitle:@"无法复制" message:@"LiveContainer 没有提供启动用的 URL scheme。"];
+        return;
+    }
+    UIPasteboard.generalPasteboard.string = url.absoluteString;
+    [self showAlertTitle:@"已复制启动链接" message:@"可以直接粘到快捷指令或其他 App 里调用。"];
+}
+
+- (void)toggleLockForEntry:(LGEntry *)entry {
+    NSURL *metaURL = [entry.url URLByAppendingPathComponent:@"LCAppInfo.plist"];
+    NSMutableDictionary *meta = [[NSDictionary dictionaryWithContentsOfURL:metaURL] mutableCopy];
+    if (!meta) meta = [NSMutableDictionary new];
+    BOOL locked = ![meta[@"isLocked"] boolValue];
+    meta[@"isLocked"] = @(locked);
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:meta format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
+    if (!data || ![data writeToURL:metaURL atomically:YES]) {
+        [self showAlertTitle:@"设置失败" message:@"无法写入应用元数据，请重试或改用原生列表。"];
+        return;
+    }
+    LGLog(locked ? @"Locked an app via LCAppInfo.plist" : @"Unlocked an app via LCAppInfo.plist");
+    [self refresh];
+}
+
+// Same entries the native banner menu offers, so long-pressing here is not a downgrade.
 - (void)showActionsForEntry:(LGEntry *)entry cell:(UICollectionViewCell *)cell {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:entry.name message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"打开应用" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [weakSelf launchEntry:entry];
+    }]];
+
+    if ([self containerFoldersForEntry:entry].count > 0) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"打开数据目录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [weakSelf openDataFolderForEntry:entry];
+        }]];
+    }
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"复制启动链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [weakSelf copyLaunchURLForEntry:entry];
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:(entry.locked ? @"解除锁定" : @"锁定应用") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [weakSelf toggleLockForEntry:entry];
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"切换到原生列表" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [weakSelf showNative];
+    }]];
+
     [sheet addAction:[UIAlertAction actionWithTitle:@"隐藏" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [weakSelf hideEntry:entry];
     }]];
+
     if (!entry.shared) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"卸载" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             [weakSelf confirmUninstallEntry:entry];

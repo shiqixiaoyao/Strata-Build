@@ -9,6 +9,19 @@ mv "$archive_path.xcarchive/Products/Applications" Payload
 # --- Built-in host plugins ---------------------------------------------------
 # LCGridLayout 随包分发，启动时由 LCBootstrap dlopen 进宿主进程。
 # 微珠（LCFloatingMenu）与 Orbit 整套编在 TweakLoader.dylib 里，和 v19 一致。
+if [ -f "BuiltInPlugins/LCGridLayout.m" ]; then
+  # 仓库里的 LCGridLayout.dylib 是预编译产物：只改 .m 不重编，包里还是旧二进制。
+  # 这里每次都用当前源码覆盖一遍，AGPL 要求的「源码随二进制」才名副其实。
+  xcrun --sdk iphoneos clang -dynamiclib -fobjc-arc \
+    -target arm64-apple-ios14.0 \
+    -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+    -framework UIKit -framework Foundation -framework PhotosUI \
+    -framework LocalAuthentication -framework QuartzCore \
+    -o BuiltInPlugins/LCGridLayout.dylib \
+    BuiltInPlugins/LCGridLayout.m
+  echo "built LCGridLayout.dylib from source: $(wc -c < BuiltInPlugins/LCGridLayout.dylib) bytes"
+fi
+
 if [ -d "BuiltInPlugins" ]; then
   for dylib in BuiltInPlugins/*.dylib; do
     [ -f "$dylib" ] || continue
