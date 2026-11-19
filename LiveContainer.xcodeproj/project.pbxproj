@@ -2083,12 +2083,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-
-	};
-	rootObject = 17DCE9952C7067EC00731D42 /* Project object */;
-}
-
 /* Begin XCLocalSwiftPackageReference section */
 		A15000000000000000000000 /* StosSign */ = {isa = XCLocalSwiftPackageReference; relativePath = Vendor/StosSign; };
 /* End XCLocalSwiftPackageReference section */
@@ -2099,3 +2093,8 @@
 		A15000000000000000000022 /* StosSign_Anisette */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000 /* StosSign */; productName = StosSign_Anisette; };
 		A15000000000000000000023 /* StosSign_Common */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000 /* StosSign */; productName = StosSign_Common; };
 /* End XCSwiftPackageProductDependency section */
+
+
+	};
+	rootObject = 17DCE9952C7067EC00731D42 /* Project object */;
+}
