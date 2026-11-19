@@ -7,8 +7,7 @@ brew install ldid
 mv "$archive_path.xcarchive/Products/Applications" Payload
 
 # --- Built-in host plugins ---------------------------------------------------
-# LCGridLayout / LCFloatingMenu 随包分发，启动时由 LCBootstrap 注入宿主进程。
-# 上游 release 里的 SideStoreTranslator 与 zh-Hans.json 不进来。
+# LCGridLayout / LCFloatingMenu 随包分发，启动时由 LCBootstrap dlopen 进宿主进程。
 if [ -d "BuiltInPlugins" ]; then
   for dylib in BuiltInPlugins/*.dylib; do
     [ -f "$dylib" ] || continue
@@ -116,25 +115,29 @@ sign_builtin_plugins() {
 
 sign_builtin_plugins
 
-# --- SideStore 汉化插件 ------------------------------------------------------
-# 词条本体在 Resources/Localizable.xcstrings（SwiftUI 的 LocalizedStringKey 与
-# NSLocalizedString 都查 main bundle，改表就够）；这个 dylib 只补代码里直接赋值的
-# UIKit 文案（弹窗标题、按钮标题、输入框占位符），这类不走本地化表。
-build_translator() {
-  [ -f .github/translator/SideStoreTranslator.m ] || return 0
-  xcrun -sdk iphoneos clang -arch arm64 -target arm64-apple-ios17.4 \
-    -fobjc-arc -O2 -dynamiclib \
-    -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-    -I .github/translator \
-    -framework Foundation -framework UIKit \
-    -o /tmp/SideStoreTranslator.dylib \
-    .github/translator/SideStoreTranslator.m .github/translator/SideStoreStrings.m || return 1
-  ldid -S"" /tmp/SideStoreTranslator.dylib
-  cp /tmp/SideStoreTranslator.dylib Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib
-  echo "translator built: $(ls -l Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib | awk '{print $5}') bytes"
+# --- 内置商店的中文表 --------------------------------------------------------
+# SideStore 0.7 自己没有本地化资源，界面文案就是 SwiftUI 里的字面量，所以
+# 「汉化」等于给宿主表补上商店那批键。词条来自已验证可用的 v19 表（2443 条，
+# 其中 2107 条是商店文案），合并时以本体的键优先，只补缺。
+merge_zh_hans() {
+  [ -f Resources/SideStoreZhHans/Localizable.strings ] || return 0
+  python3 - <<'PY'
+import plistlib
+src = 'Resources/SideStoreZhHans/Localizable.strings'
+dst = 'Payload/LiveContainer.app/zh-Hans.lproj/Localizable.strings'
+base = plistlib.load(open(dst, 'rb'))
+extra = plistlib.load(open(src, 'rb'))
+added = 0
+for k, v in extra.items():
+    if k not in base:
+        base[k] = v
+        added += 1
+plistlib.dump(base, open(dst, 'wb'), fmt=plistlib.FMT_BINARY)
+print('zh-Hans merged: +%d of %d -> %d entries' % (added, len(extra), len(base)))
+PY
 }
 
-build_translator
+merge_zh_hans
 
 # temporarily move sidestore support framrwork to tmp before zip
 mkdir tmp
@@ -183,15 +186,15 @@ mv ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore.dylib
 ldid -S"" ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 cp ./.github/sidelc/LCAppInfo.plist ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/
 
-# --- 内置商店的汉化插件 ------------------------------------------------------
-# 不做 Mach-O 注入：LCBootstrap 在内置商店出现时 dlopen 这个 dylib，
-# 进程内 swizzle 直接生效，失败也只是保持英文，不会影响商店启动。
+# --- 商店自己的 bundle 也放一份中文表 ----------------------------------------
+# 商店里有一部分文案按 Bundle(for:) 查，主程序表覆盖不到，和 v19 一样两边都放。
 SS_FW=./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework
-if [ -f ./Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib ]; then
-  ldid -S"" ./Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib
-  # 双保险：把中文表也放一份到 framework 里，走 Bundle(for:) 的查找也能命中
-  [ -d ./Payload/LiveContainer.app/zh-Hans.lproj ] && cp -R ./Payload/LiveContainer.app/zh-Hans.lproj "$SS_FW/"
-  echo "translator ready: $(ls -l ./Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib | awk '{print $5}') bytes"
+if [ -d ./Payload/LiveContainer.app/zh-Hans.lproj ]; then
+  mkdir -p "$SS_FW/zh-Hans.lproj"
+  cp ./Payload/LiveContainer.app/zh-Hans.lproj/Localizable.strings "$SS_FW/zh-Hans.lproj/"
+  [ -f ./Payload/LiveContainer.app/zh-Hans.lproj/Localizable.stringsdict ] && \
+    cp ./Payload/LiveContainer.app/zh-Hans.lproj/Localizable.stringsdict "$SS_FW/zh-Hans.lproj/"
+  echo "store bundle zh-Hans: $(ls -l "$SS_FW/zh-Hans.lproj/Localizable.strings" | awk '{print $5}') bytes"
 fi
 
 # copy intents

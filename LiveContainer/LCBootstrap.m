@@ -329,24 +329,6 @@ NSString *LCRunGuestExtension(NSDictionary *request, int argc, char *argv[], cha
     return nil;
 }
 
-// 内置商店（SideStoreApp.framework）跑在宿主进程里，界面文案是硬编码英文。
-// 这个插件只补代码里直接赋值的 UIKit 文案（弹窗/按钮/占位符），SwiftUI 的
-// Text 走 Localizable.xcstrings，不归它管。加载失败就保持英文，不影响商店启动。
-static void StrataLoadSideStoreTranslator(void) {
-    NSString *base = NSBundle.mainBundle.bundlePath;
-    NSArray<NSString *> *candidates = @[
-        [base stringByAppendingPathComponent:@"Frameworks/SideStoreTranslator.dylib"],
-        [base stringByAppendingPathComponent:@"../../Frameworks/SideStoreTranslator.dylib"],
-    ];
-    for (NSString *path in candidates) {
-        if (![NSFileManager.defaultManager fileExistsAtPath:path]) continue;
-        if (!dlopen(path.UTF8String, RTLD_LAZY)) {
-            NSLog(@"[LCBootstrap] translator load failed: %s", dlerror());
-        }
-        return;
-    }
-}
-
 // 内置宿主插件：两个 dylib 都以 constructor 自启动，所以 dlopen 之后不需要再调用入口。
 // 必须在 LiveContainerSwiftUI 框架加载之后执行，插件的宿主检测（NSClassFromString(@"LCUtils")）
 // 才找得到类。失败只记日志，不影响启动。
@@ -762,9 +744,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     
     if(sideStoreExist) {
-        if (isSideStore) {
-            StrataLoadSideStoreTranslator();
-        }
         if (!isLiveProcess && (isSideStore || ![guestAppInfo[@"dontInjectTweakLoader"] boolValue])) {
             dlopen([lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/SideStoreSupport.framework/SideStoreSupport"].UTF8String, RTLD_LAZY);
         } else if (isLiveProcess && isSideStore) {
