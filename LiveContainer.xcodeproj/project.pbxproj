@@ -446,10 +446,6 @@
 		174140B82D9C0F9100F3F928 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				A15000000000000000000023 /* StosSign_Common */,
-				A15000000000000000000022 /* StosSign_Anisette */,
-				A15000000000000000000021 /* StosSign_Auth */,
-				A15000000000000000000020 /* StosSign_API */,
 				E1946AD63041BFDD005CBEDD /* IOKit.framework */,
 				17554B712DA16988004C6D90 /* OpenSSL.xcframework */,
 				174140D52D9C176700F3F928 /* libarchive.tbd */,
@@ -2088,6 +2084,11 @@
 		};
 /* End XCConfigurationList section */
 
+
+	};
+	rootObject = 17DCE9952C7067EC00731D42 /* Project object */;
+}
+
 /* Begin XCLocalSwiftPackageReference section */
 		A15000000000000000000000 /* StosSign */ = {isa = XCLocalSwiftPackageReference; relativePath = Vendor/StosSign; };
 /* End XCLocalSwiftPackageReference section */
@@ -2098,6 +2099,3 @@
 		A15000000000000000000022 /* StosSign_Anisette */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000 /* StosSign */; productName = StosSign_Anisette; };
 		A15000000000000000000023 /* StosSign_Common */ = {isa = XCSwiftPackageProductDependency; package = A15000000000000000000000 /* StosSign */; productName = StosSign_Common; };
 /* End XCSwiftPackageProductDependency section */
-	};
-	rootObject = 17DCE9952C7067EC00731D42 /* Project object */;
-}
