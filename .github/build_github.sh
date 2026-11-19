@@ -55,6 +55,16 @@ ADHOC_APP_ENTITLEMENTS=.github/sidelc/LiveContainer_adhoc.xml
 write_appex_entitlements() {
   appex_bundle_id="$1"
   appex_out="$2"
+  # LiveProcess 自己有一份更完整的 entitlements（increased-memory-limit、HealthKit、
+  # 128 个 keychain group）。用固定四键模板重签会把这些全抹掉，表现就是「内存扩容没了」。
+  case "$appex_bundle_id" in
+    *.LiveProcess)
+      if [ -f .github/sidelc/LiveProcess_adhoc.xml ]; then
+        sed "s/__APPEX_BUNDLE_ID__/$appex_bundle_id/" .github/sidelc/LiveProcess_adhoc.xml > "$appex_out"
+        return 0
+      fi
+      ;;
+  esac
   cat > "$appex_out" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
