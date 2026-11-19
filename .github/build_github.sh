@@ -12,13 +12,18 @@ mv "$archive_path.xcarchive/Products/Applications" Payload
 if [ -f "BuiltInPlugins/LCGridLayout.m" ]; then
   # 仓库里的 LCGridLayout.dylib 是预编译产物：只改 .m 不重编，包里还是旧二进制。
   # 这里每次都用当前源码覆盖一遍，AGPL 要求的「源码随二进制」才名副其实。
-  xcrun --sdk iphoneos clang -dynamiclib -fobjc-arc \
-    -target arm64-apple-ios14.0 \
-    -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-    -framework UIKit -framework Foundation -framework PhotosUI \
-    -framework LocalAuthentication -framework QuartzCore \
-    -o BuiltInPlugins/LCGridLayout.dylib \
-    BuiltInPlugins/LCGridLayout.m
+  # CGRectGetMaxX / CGRectZero 这些在 CoreGraphics 里，QuartzCore 只有 CALayer；
+  # 少一个 -framework CoreGraphics 就是链接期 Undefined symbols，dylib 根本不生成。
+  if ! xcrun --sdk iphoneos clang -dynamiclib -fobjc-arc \
+      -target arm64-apple-ios14.0 \
+      -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+      -framework UIKit -framework Foundation -framework CoreGraphics \
+      -framework PhotosUI -framework LocalAuthentication -framework QuartzCore \
+      -o BuiltInPlugins/LCGridLayout.dylib \
+      BuiltInPlugins/LCGridLayout.m; then
+    echo "LCGridLayout build failed; refusing to ship an IPA without the plugin"
+    exit 1
+  fi
   echo "built LCGridLayout.dylib from source: $(wc -c < BuiltInPlugins/LCGridLayout.dylib) bytes"
 fi
 
