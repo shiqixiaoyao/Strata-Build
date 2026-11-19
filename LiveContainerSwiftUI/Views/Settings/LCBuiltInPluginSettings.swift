@@ -1,9 +1,15 @@
 import SwiftUI
+import UIKit
 
 /// 两个随包内置的宿主插件。写入 UserDefaults，下次启动由 LCBootstrap 读取。
 struct LCBuiltInPluginSettings: View {
     @AppStorage("LCBuiltInGridLayoutEnabled") private var gridLayout = true
     @AppStorage("LCBuiltInFloatingMenuEnabled") private var floatingMenu = true
+    @State private var diagnostics = ""
+
+    private var diagnosticsURL: URL {
+        LCPath.docPath.appendingPathComponent("LCBuiltInPlugins.log")
+    }
 
     var body: some View {
         List {
@@ -19,8 +25,39 @@ struct LCBuiltInPluginSettings: View {
             } footer: {
                 Text("Both plugins are injected into LiveContainer itself and only take effect after a full restart. The grid replaces the app list; the floating menu adds a side notch.".loc)
             }
+
+            Section {
+                if diagnostics.isEmpty {
+                    Text("暂无诊断信息。重启一次 LiveContainer，再回到这里。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView {
+                        Text(diagnostics)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 320)
+                    Button {
+                        UIPasteboard.general.string = diagnostics
+                    } label: {
+                        Label("复制诊断信息", systemImage: "doc.on.doc")
+                    }
+                }
+            } header: {
+                Text("内置插件诊断")
+            } footer: {
+                Text("记录每个内置 dylib 的加载结果、微珠插件自己的宿主判定，以及启动 3 秒后屏幕上有没有它的窗口。每次启动重写。")
+            }
         }
         .navigationTitle("Built-in plugins".loc)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: reloadDiagnostics)
+        .refreshable { reloadDiagnostics() }
+    }
+
+    private func reloadDiagnostics() {
+        diagnostics = (try? String(contentsOf: diagnosticsURL, encoding: .utf8)) ?? ""
     }
 }

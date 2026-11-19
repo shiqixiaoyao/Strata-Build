@@ -8,6 +8,8 @@
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
 #include <objc/runtime.h>
+#include <objc/message.h>
+#include <stdarg.h>
 
 #include <dlfcn.h>
 #include <execinfo.h>
@@ -335,6 +337,95 @@ static BOOL StrataBuiltInPluginEnabled(NSString *key) {
     return stored == nil || [stored boolValue];
 }
 
+#pragma mark - 内置插件诊断
+
+// 装机后不连 Mac 也能看到结果：每次启动重写 Documents/LCBuiltInPlugins.log，
+// 设置 → 内置插件 里直接显示这份内容。
+static NSString *StrataPluginLogPath(void) {
+    NSString *doc = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].lastObject.path;
+    return [doc stringByAppendingPathComponent:@"LCBuiltInPlugins.log"];
+}
+
+static void StrataPluginLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    NSString *path = StrataPluginLogPath();
+    NSString *line = [message stringByAppendingString:@"\n"];
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (handle) {
+        @try {
+            [handle seekToEndOfFile];
+            [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [handle closeFile];
+        } @catch (__unused NSException *exception) {
+        }
+    } else {
+        [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
+}
+
+static id StrataClassValue(Class cls, NSString *selectorName) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (!cls || ![cls respondsToSelector:sel]) return nil;
+    return ((id(*)(id, SEL))objc_msgSend)(cls, sel);
+}
+
+static BOOL StrataClassBool(Class cls, NSString *selectorName) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (!cls || ![cls respondsToSelector:sel]) return NO;
+    return ((BOOL(*)(id, SEL))objc_msgSend)(cls, sel);
+}
+
+// 启动 3 秒后回看一次：插件的宿主判定、注册的模块、以及屏幕上到底有没有它的窗口。
+static void StrataReportBuiltInPluginState(void) {
+    StrataPluginLog(@"---- t+3s ----");
+    Class hostClass = NSClassFromString(@"LCOrbitHost");
+    StrataPluginLog(@"LCOrbitHost %@", hostClass ? @"present" : @"MISSING");
+    if (hostClass) {
+        StrataPluginLog(@"  isHostUI = %d", StrataClassBool(hostClass, @"isHostUI"));
+        StrataPluginLog(@"  guestInfo = %@", StrataClassValue(hostClass, @"guestInfo"));
+        StrataPluginLog(@"  guestIdentifier = %@", StrataClassValue(hostClass, @"guestIdentifier"));
+        StrataPluginLog(@"  activeScene = %@", StrataClassValue(hostClass, @"activeScene"));
+    }
+    StrataPluginLog(@"LCFloatingMenuModule %@", NSClassFromString(@"LCFloatingMenuModule") ? @"present" : @"MISSING");
+    Class coreClass = NSClassFromString(@"LCOrbitCore");
+    if (coreClass) {
+        id core = StrataClassValue(coreClass, @"sharedCore");
+        NSArray *identifiers = core ? ((id(*)(id, SEL))objc_msgSend)(core, NSSelectorFromString(@"registeredModuleIdentifiers")) : nil;
+        StrataPluginLog(@"  modules = %@", identifiers ?: @"(none)");
+        for (NSString *identifier in identifiers) {
+            SEL sel = NSSelectorFromString(@"isModuleEnabled:");
+            BOOL enabled = core && [core respondsToSelector:sel] &&
+                ((BOOL(*)(id, SEL, id))objc_msgSend)(core, sel, identifier);
+            StrataPluginLog(@"    %@ enabled=%d", identifier, enabled);
+        }
+    } else {
+        StrataPluginLog(@"  LCOrbitCore MISSING");
+    }
+    UIApplication *application = UIApplication.sharedApplication;
+    for (UIScene *scene in application.connectedScenes) {
+        StrataPluginLog(@"scene %@ activationState=%ld", NSStringFromClass(scene.class), (long)scene.activationState);
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            StrataPluginLog(@"  window %@ hidden=%d level=%.1f frame=%@",
+                            NSStringFromClass(window.class), window.hidden, window.windowLevel,
+                            NSStringFromCGRect(window.frame));
+        }
+    }
+    NSString *doc = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].lastObject.path;
+    NSString *runtimeLog = [doc stringByAppendingPathComponent:@"LCOrbit/logs/runtime.json"];
+    NSData *data = [NSData dataWithContentsOfFile:runtimeLog];
+    if (data.length) {
+        NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if (text.length > 1600) text = [text substringFromIndex:text.length - 1600];
+        StrataPluginLog(@"runtime.json tail:\n%@", text);
+    } else {
+        StrataPluginLog(@"runtime.json 不存在（插件还没写过日志）");
+    }
+}
+
 // 内置宿主插件：两个 dylib 都以 constructor 自启动，所以 dlopen 之后不需要再调用入口。
 // 必须在 LiveContainerSwiftUI 框架加载之后执行，插件的宿主检测（NSClassFromString(@"LCUtils")）
 // 才找得到类。失败只记日志，不影响启动。
@@ -342,16 +433,26 @@ static void StrataLoadBuiltInHostPlugins(void) {
     NSArray<NSString *> *plugins = @[@"LCGridLayout", @"LCFloatingMenu"];
     NSArray<NSString *> *keys = @[@"LCBuiltInGridLayoutEnabled", @"LCBuiltInFloatingMenuEnabled"];
     NSString *frameworks = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
+    [@"" writeToFile:StrataPluginLogPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    StrataPluginLog(@"==== LiveContainer %@ (%@) ====",
+                    lcMainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?",
+                    lcMainBundle.infoDictionary[@"CFBundleVersion"] ?: @"?");
+    StrataPluginLog(@"mainBundle = %@", NSBundle.mainBundle.bundlePath);
+    StrataPluginLog(@"lcMainBundle = %@", lcMainBundle.bundlePath);
+    StrataPluginLog(@"LCLoadTweaksToSelf raw=%@ isSideStore=%d isLiveProcess=%d",
+                    [lcUserDefaults objectForKey:@"LCLoadTweaksToSelf"], isSideStore, isLiveProcess);
+    StrataPluginLog(@"guestAppInfo = %@", guestAppInfo ? @"set" : @"nil");
+    BOOL menuRequested = NO;
     for (NSUInteger i = 0; i < plugins.count; i++) {
         NSString *name = plugins[i];
         NSString *settingsKey = keys[i];
         if ([lcUserDefaults objectForKey:settingsKey] != nil && ![lcUserDefaults boolForKey:settingsKey]) {
-            NSLog(@"[LC] built-in plugin disabled by setting: %@", name);
+            StrataPluginLog(@"%@ 被设置关闭（%@）", name, settingsKey);
             continue;
         }
         NSString *file = [frameworks stringByAppendingPathComponent:[name stringByAppendingString:@".dylib"]];
         if (![NSFileManager.defaultManager fileExistsAtPath:file]) {
-            NSLog(@"[LC] built-in plugin missing: %@", file);
+            StrataPluginLog(@"%@ 缺失：%@", name, file);
             continue;
         }
         if ([name isEqualToString:@"LCFloatingMenu"]) {
@@ -361,14 +462,21 @@ static void StrataLoadBuiltInHostPlugins(void) {
             // 这个键，插件就把自己当成 Guest，启动后直接什么都不做——之前两个包都带了 dylib
             // 却看不到微珠就是这个原因。这里替它把键写上，插件才会进 host UI 分支。
             [lcUserDefaults setBool:YES forKey:@"LCLoadTweaksToSelf"];
+            StrataPluginLog(@"已写入 LCLoadTweaksToSelf=YES，回读=%@", [lcUserDefaults objectForKey:@"LCLoadTweaksToSelf"]);
+            menuRequested = YES;
         }
+        NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:file error:nil];
         void *handle = dlopen(file.UTF8String, RTLD_LAZY);
         if (handle) {
-            NSLog(@"[LC] built-in plugin loaded: %@", name);
+            StrataPluginLog(@"%@ dlopen OK（%llu bytes）", name, attributes.fileSize);
         } else {
             const char *error = dlerror();
-            NSLog(@"[LC] built-in plugin failed: %@ (%@)", name, error ? [NSString stringWithUTF8String:error] : @"unknown");
+            StrataPluginLog(@"%@ dlopen 失败：%@", name, error ? [NSString stringWithUTF8String:error] : @"unknown");
         }
+    }
+    if (menuRequested) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ StrataReportBuiltInPluginState(); });
     }
 }
 
