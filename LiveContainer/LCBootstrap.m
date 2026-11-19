@@ -366,6 +366,24 @@ static void StrataPluginLog(NSString *format, ...) {
     }
 }
 
+// 微珠插件只读 LCLoadTweaksToSelf 这一个键来判断「当前进程是不是 LC 本体」。
+// 写 defaults 万一落进别的域（App Group / 扩展域 / 被同步覆盖）就读不到，所以再加一层
+// 定向替换：本进程内这个键的 boolForKey 恒为 YES，其它键原样透传。
+static BOOL (*StrataOriginalBoolForKey)(id, SEL, NSString *);
+static BOOL StrataForcedBoolForKey(id self, SEL _cmd, NSString *key) {
+    if ([key isEqualToString:@"LCLoadTweaksToSelf"]) return YES;
+    return StrataOriginalBoolForKey(self, _cmd, key);
+}
+static void StrataForceHostGate(void) {
+    static BOOL installed = NO;
+    if (installed) return;
+    installed = YES;
+    Method method = class_getInstanceMethod(NSUserDefaults.class, @selector(boolForKey:));
+    if (!method) return;
+    StrataOriginalBoolForKey = (BOOL (*)(id, SEL, NSString *))method_getImplementation(method);
+    method_setImplementation(method, (IMP)StrataForcedBoolForKey);
+}
+
 static id StrataClassValue(Class cls, NSString *selectorName) {
     SEL sel = NSSelectorFromString(selectorName);
     if (!cls || ![cls respondsToSelector:sel]) return nil;
@@ -462,7 +480,9 @@ static void StrataLoadBuiltInHostPlugins(void) {
             // 这个键，插件就把自己当成 Guest，启动后直接什么都不做——之前两个包都带了 dylib
             // 却看不到微珠就是这个原因。这里替它把键写上，插件才会进 host UI 分支。
             [lcUserDefaults setBool:YES forKey:@"LCLoadTweaksToSelf"];
-            StrataPluginLog(@"已写入 LCLoadTweaksToSelf=YES，回读=%@", [lcUserDefaults objectForKey:@"LCLoadTweaksToSelf"]);
+            StrataForceHostGate();
+            StrataPluginLog(@"已写入 LCLoadTweaksToSelf=YES，回读=%@，已强制 boolForKey 返回 YES",
+                            [lcUserDefaults objectForKey:@"LCLoadTweaksToSelf"]);
             menuRequested = YES;
         }
         NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:file error:nil];
