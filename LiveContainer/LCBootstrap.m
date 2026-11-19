@@ -329,6 +329,12 @@ NSString *LCRunGuestExtension(NSDictionary *request, int argc, char *argv[], cha
     return nil;
 }
 
+// 内置插件默认开，只有用户显式关掉才算关（和 SwiftUI 设置页的语义一致）。
+static BOOL StrataBuiltInPluginEnabled(NSString *key) {
+    NSNumber *stored = [lcUserDefaults objectForKey:key];
+    return stored == nil || [stored boolValue];
+}
+
 // 内置宿主插件：两个 dylib 都以 constructor 自启动，所以 dlopen 之后不需要再调用入口。
 // 必须在 LiveContainerSwiftUI 框架加载之后执行，插件的宿主检测（NSClassFromString(@"LCUtils")）
 // 才找得到类。失败只记日志，不影响启动。
@@ -347,6 +353,14 @@ static void StrataLoadBuiltInHostPlugins(void) {
         if (![NSFileManager.defaultManager fileExistsAtPath:file]) {
             NSLog(@"[LC] built-in plugin missing: %@", file);
             continue;
+        }
+        if ([name isEqualToString:@"LCFloatingMenu"]) {
+            // 微珠只在自己被判成「被注入到 LC 本体」时才挂悬浮层：插件读 LCLoadTweaksToSelf
+            // 这个开发者开关判断当前进程是不是宿主（LCOrbitHost.isHostUI）。内置注入绕过了
+            // 上游那套「dylib 放进 Documents/Tweaks → TweakLoader 加载」的安装路径，没人写
+            // 这个键，插件就把自己当成 Guest，启动后直接什么都不做——之前两个包都带了 dylib
+            // 却看不到微珠就是这个原因。这里替它把键写上，插件才会进 host UI 分支。
+            [lcUserDefaults setBool:YES forKey:@"LCLoadTweaksToSelf"];
         }
         void *handle = dlopen(file.UTF8String, RTLD_LAZY);
         if (handle) {
@@ -987,7 +1001,12 @@ int LiveContainerMain(int argc, char *argv[]) {
         void* sideStoreHandle = dlopen("@executable_path/Frameworks/SideStoreSupport.framework/SideStoreSupport", RTLD_LAZY);
     }
 
-    if ([lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"]) {
+    // 内置微珠开着的时候跳过原生这次全量注入：上面为了点亮微珠已经把
+    // LCLoadTweaksToSelf 写成了 YES，而这一段会把这个键理解成「把 Documents/Tweaks
+    // 里的所有插件都塞进宿主」——既可能重复加载微珠，也可能让不兼容的插件把宿主搞崩。
+    // 微珠由内建加载器负责；用户关掉内置开关后才回到原生行为。
+    BOOL builtInFloatingMenu = StrataBuiltInPluginEnabled(@"LCBuiltInFloatingMenuEnabled");
+    if ([lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"] && !builtInFloatingMenu) {
         NSString *tweakFolder = nil;
         if (isSharedBundle) {
             NSURL *appGroupPath = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:[LCSharedUtils appGroupID]];
