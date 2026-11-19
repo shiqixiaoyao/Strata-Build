@@ -60,7 +60,9 @@
     return !self.isBuiltinSideStore && !self.isLiveProcess;
 }
 + (BOOL)isGuestContext {
-    if(self.isBuiltinSideStore) return NO;
+    // 内置 SideStore 在 LC 里本身就是一个访客 App，微珠照样该在它里面出现，
+    // 所以这里不能再按 isBuiltinSideStore 一票否决（4.0 的写法，搬到 3.9 就成了
+    // 「装好了但 App 里什么都没有」）。宿主由 isHostUI 单独判定。
     if(self.isHostUI) return NO;
     // Strata 2.0：访客的 guestAppInfo 在部分启动路径（访客扩展、多进程复用）
     // 里读不到，所以这里不能只认 guestAppInfo —— 只要 mainBundle 已经被改写成

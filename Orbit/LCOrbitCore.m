@@ -205,21 +205,21 @@ static void LCOrbitBootstrapIfNeeded(void) {
         if(LCOrbitAttempts==1) LCOrbitReportStatus(@"switch-off",source);
         return;
     }
-    // 访客进程（注入到 App 里）和 LC 宿主界面都要挂微珠：v19 的 TweakLoader 在两种
-    // 进程里都会加载，插件的宿主分支（isHostUI）本来就是给 LC 本体准备的。只在访客
-    // 启动的写法会让「装好包却看不到微珠」——之前就是因为判断写成了 guest-only。
+    // 只在访客进程（被注入的那个 App）里启动，宿主 LC 本体一律不启动。
+    // 这是 v19 的真实行为：v19 的 LCLoadTweaksToSelf 默认是关的，TweakLoader 根本
+    // 不会进宿主，所以 Orbit 的宿主分支（isHostUI）在 LC 里从来没跑过。那条分支是
+    // 4.0 宿主（Strata）才配得上的东西，硬拉进 3.9 宿主就是启动即崩。
     BOOL guestContext=[LCOrbitHost isGuestContext];
-    BOOL hostContext=[LCOrbitHost isHostUI];
-    if(!guestContext && !hostContext) {
+    if(!guestContext) {
         if(LCOrbitAttempts==1)
-            LCOrbitReportStatus(@"not-guest",[NSString stringWithFormat:@"hostUI=%d guest=%d bundle=%@",
-                hostContext,guestContext,NSBundle.mainBundle.bundleIdentifier?:@"?"]);
+            LCOrbitReportStatus(@"not-guest",[NSString stringWithFormat:@"guest=%d bundle=%@",
+                guestContext,NSBundle.mainBundle.bundleIdentifier?:@"?"]);
         return;
     }
     LCOrbitBootstrapped=YES;
     LCOrbitStopWaiting();
-    NSLog(@"[Strata][Orbit] bootstrap enabled, context=%@ guest=%@ source=%@ attempt=%ld",
-          hostContext?@"lc-host":@"guest",[LCOrbitHost guestIdentifier],source,(long)LCOrbitAttempts);
+    NSLog(@"[Strata][Orbit] bootstrap enabled, context=guest guest=%@ source=%@ attempt=%ld",
+          [LCOrbitHost guestIdentifier],source,(long)LCOrbitAttempts);
     LCOrbitCore *core=[LCOrbitCore sharedCore];
     LCFloatingMenuRegisterWithOrbit(core);
     [core start];
