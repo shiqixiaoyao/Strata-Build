@@ -116,6 +116,26 @@ sign_builtin_plugins() {
 
 sign_builtin_plugins
 
+# --- SideStore 汉化插件 ------------------------------------------------------
+# 词条本体在 Resources/Localizable.xcstrings（SwiftUI 的 LocalizedStringKey 与
+# NSLocalizedString 都查 main bundle，改表就够）；这个 dylib 只补代码里直接赋值的
+# UIKit 文案（弹窗标题、按钮标题、输入框占位符），这类不走本地化表。
+build_translator() {
+  [ -f .github/translator/SideStoreTranslator.m ] || return 0
+  xcrun -sdk iphoneos clang -arch arm64 -target arm64-apple-ios17.4 \
+    -fobjc-arc -O2 -dynamiclib \
+    -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+    -I .github/translator \
+    -framework Foundation -framework UIKit \
+    -o /tmp/SideStoreTranslator.dylib \
+    .github/translator/SideStoreTranslator.m .github/translator/SideStoreStrings.m || return 1
+  ldid -S"" /tmp/SideStoreTranslator.dylib
+  cp /tmp/SideStoreTranslator.dylib Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib
+  echo "translator built: $(ls -l Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib | awk '{print $5}') bytes"
+}
+
+build_translator
+
 # temporarily move sidestore support framrwork to tmp before zip
 mkdir tmp
 mv Payload/LiveContainer.app/Frameworks/SideStoreSupport.framework ./tmp
@@ -162,6 +182,17 @@ rm ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 mv ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore.dylib ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 ldid -S"" ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 cp ./.github/sidelc/LCAppInfo.plist ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/
+
+# --- 内置商店的汉化插件 ------------------------------------------------------
+# 不做 Mach-O 注入：LCBootstrap 在内置商店出现时 dlopen 这个 dylib，
+# 进程内 swizzle 直接生效，失败也只是保持英文，不会影响商店启动。
+SS_FW=./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework
+if [ -f ./Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib ]; then
+  ldid -S"" ./Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib
+  # 双保险：把中文表也放一份到 framework 里，走 Bundle(for:) 的查找也能命中
+  [ -d ./Payload/LiveContainer.app/zh-Hans.lproj ] && cp -R ./Payload/LiveContainer.app/zh-Hans.lproj "$SS_FW/"
+  echo "translator ready: $(ls -l ./Payload/LiveContainer.app/Frameworks/SideStoreTranslator.dylib | awk '{print $5}') bytes"
+fi
 
 # copy intents
 cp ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/Intents.intentdefinition ./Payload/LiveContainer.app/
