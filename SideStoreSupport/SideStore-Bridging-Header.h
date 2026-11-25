@@ -5,5 +5,4 @@
 #include "XPCServer.h"
 #include "../LiveContainer/utils.h"
 #include "PrivateIntentRunner.h"
-void LCSSExportWidgetSnapshot(void);
 #endif /* SideStore_Bridging_Header_h_h */

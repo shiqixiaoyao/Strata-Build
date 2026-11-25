@@ -18,7 +18,6 @@ func performIntentRefresh(identifier: String, mangledTypeName: String, intentPro
         RefreshHandler.shared.progress = intentProgress
         try await RefreshHandler.shared.startRefresh(identifier: identifier, mangledName: mangledTypeName)
     }
-    LCSSExportWidgetSnapshot()
 }
 
 @available(iOS 17.0, *)

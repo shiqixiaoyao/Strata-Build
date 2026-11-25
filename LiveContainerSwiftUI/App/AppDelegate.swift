@@ -39,12 +39,6 @@ import Intents
         configuration.delegateClass = SceneDelegate.self
         return configuration
     }
-
-    func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
-        if #available(iOS 16.1, *) {
-            MultitaskWindowManager.discardSessions(sceneSessions)
-        }
-    }
     
     func application(_ application: UIApplication, handlerFor intent: INIntent) -> Any? {
         switch intent {
@@ -77,7 +71,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObject { // Make
         if newOptions == nil {
             newOptions = UIScene.ActivationRequestOptions()
         }
-        newOptions!._setRequestFullscreen(self.keyWindow.map { UIScreen.main.bounds == $0.bounds } ?? true)
+        newOptions!._setRequestFullscreen(UIScreen.main.bounds == self.keyWindow!.bounds)
         self.hook_requestSceneSessionActivation(sceneSession, userActivity: userActivity, options: newOptions, errorHandler: errorHandler)
     }
     
