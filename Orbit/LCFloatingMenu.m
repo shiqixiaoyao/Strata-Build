@@ -12,21 +12,24 @@
 #import "LCOrbitOverlayManager.h"
 #import "LCOrbitGuestService.h"
 #import "LCOrbitMultitask.h"
+#import "LCOrbitTaskSwitcher.h"
 #import "LCOrbitHostSettings.h"
 #import "LCOrbitPluginUpdater.h"
 #import "LCOrbitTweakAudit.h"
 #import "LCOrbitTweakSync.h"
 #import "LCOrbitSharedTweaksViewController.h"
 #import "LCOrbitLogViewer.h"
+#import "LCOrbitGuestUIKitDiagnostics.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <math.h>
 #import <stdlib.h>
+#import <string.h>
 
 // Semantic version is maintained here; the exact source commit is embedded
 // automatically by LCOrbit/Build/build.sh for reliable update comparison.
-#define FM_MENU_VERSION @"1.0.40"
+#define FM_MENU_VERSION @"1.0.48"
 #ifndef FM_BUILD_COMMIT
 #define FM_BUILD_COMMIT @"unknown"
 #endif
@@ -164,21 +167,29 @@ static void FMBeginPreferenceSnapshotUsingValues(NSDictionary *values) {
     if(FMSnapshotDepth++) return;
     FMSnapshot=[FMPreferenceSnapshot new];
     FMSnapshot.values=values?:[[LCOrbitStorage preferences] dictionaryRepresentation];
+    [LCOrbitStorage beginReadSnapshot:FMSnapshot.values];
 }
 static void FMBeginPreferenceSnapshot(void) {
     FMBeginPreferenceSnapshotUsingValues(nil);
 }
 static void FMEndPreferenceSnapshot(void) {
-    if(FMSnapshotDepth && !--FMSnapshotDepth) FMSnapshot=nil;
+    if(FMSnapshotDepth && !--FMSnapshotDepth) {
+        [LCOrbitStorage endReadSnapshot];
+        FMSnapshot=nil;
+    }
 }
 static NSDictionary *GuestInfo(void) { return [LCOrbitHost guestInfo]; }
 static BOOL FMHostUI(void) { return [LCOrbitHost isHostUI]; }
 static NSString *GuestID(void) { return [LCOrbitHost guestIdentifier]; }
 static NSString *FMAppKey(NSDictionary *app) { return app[@"identity"] ?: app[@"path"] ?: @""; }
+static NSString *FMAppStatus(NSDictionary *app,BOOL current) {
+    NSString *state=current?@"当前":app[@"status"];
+    if(!state.length && [app[@"shared"] boolValue]) state=@"共享";
+    return state;
+}
 static NSString *FMAppCaption(NSDictionary *app) {
     NSString *title=app[@"title"] ?: @"";
-    NSString *state=[LCOrbitGuestService isCurrentGuest:app]?@"当前":app[@"status"];
-    if(!state.length && [app[@"shared"] boolValue]) state=@"共享";
+    NSString *state=FMAppStatus(app,[LCOrbitGuestService isCurrentGuest:app]);
     return state.length?[NSString stringWithFormat:@"%@ · %@",title,state]:title;
 }
 // What a row shows. The current app already wears a green light, so its title does not
@@ -196,6 +207,31 @@ static NSUInteger FMStagedRev=0;
 static BOOL BoolPref(NSString *key,BOOL def) {
     id v=FMStaged[Pref(key)] ?: [HostDefaults() objectForKey:Pref(key)];
     return v?[v boolValue]:def;
+}
+// 0 关闭，0.5 是此前版本固定的手感，1 为两倍。旧版本只存开/关布尔，缺少
+// hapticStrength 时回退读 haptic：关 → 0，开 → 0.5，于是升级后的默认手感不变。
+static CGFloat HapticStrength(void) {
+    id v=FMStaged[Pref(@"hapticStrength")] ?: [HostDefaults() objectForKey:Pref(@"hapticStrength")];
+    if([v isKindOfClass:NSNumber.class]) return Clamp([v doubleValue],0,1);
+    return BoolPref(@"haptic",YES)?.5:0;
+}
+// The row shows the raw percentage only; the midpoint is where the old fixed
+// feel sat, so 50% always means "same as before" without extra words.
+static NSString *FMHapticPercent(CGFloat value) {
+    return [NSString stringWithFormat:@"%d%%",(int)lround(Clamp(value,0,1)*100)];
+}
+// Every tap-confirmation goes through here so one setting decides whether it
+// happens and how strong it feels. iOS 13 gained an intensity argument; older
+// systems keep their fixed weight, so callers pass a value that matches the
+// style they picked. The slider's midpoint leaves that value untouched.
+static void FMHaptic(UIImpactFeedbackStyle style,CGFloat intensity) {
+    CGFloat strength=HapticStrength();
+    if(strength<=0) return;
+    CGFloat scaled=Clamp(intensity*strength/.5,0,1);
+    UIImpactFeedbackGenerator *generator=[[UIImpactFeedbackGenerator alloc] initWithStyle:style];
+    [generator prepare];
+    if(@available(iOS 13.0,*)) [generator impactOccurredWithIntensity:scaled];
+    else [generator impactOccurred];
 }
 static CGFloat FloatPref(NSString *key,CGFloat def) {
     id v=FMStaged[Pref(key)] ?: [HostDefaults() objectForKey:Pref(key)];
@@ -501,6 +537,7 @@ static NSArray<NSDictionary *> *FMMenuStyleOptions(void) {
         @{@"key":@"menuCurveSoftness",@"title":@"凹角弧度",@"min":@.2,@"max":@.9,@"default":@.64,@"unit":@"%",@"step":@.01},
         @{@"key":@"menuCompactIconSize",@"title":@"图标模式图标大小",@"min":@28,@"max":@50,@"default":@46,@"unit":@"点",@"step":@1},
         @{@"key":@"menuListIconSize",@"title":@"列表模式图标大小",@"min":@24,@"max":@44,@"default":@36,@"unit":@"点",@"step":@1},
+        @{@"key":@"adaptiveDockIconSize",@"title":@"自适应 Dock 图标大小",@"min":@24,@"max":@50,@"default":@36,@"unit":@"点",@"step":@1},
         // On top of whatever the head needs cleared, none of it by default; below zero it
         // lifts the whole block instead, as far as the top edge.
         @{@"key":@"menuTopPadding",@"title":@"上方留白",@"min":@(-16),@"max":@40,@"default":@0,@"unit":@"点",@"step":@1}
@@ -1032,11 +1069,11 @@ static CGFloat FMRubberProgress(CGFloat progress) {
 }
 // Pop-in of the drawer contents, after the wloc dock: the index-th of count
 // elements (0 is the lowest one) starts this many seconds after the shell is
-// wide enough. Neighbours are .07 s apart, squeezed so a long list still
-// finishes its stagger within half a second.
+// wide enough. Neighbours are .05 s apart, squeezed so a long list still
+// finishes its stagger within a third of a second.
 static CGFloat FMPopDelay(NSUInteger index,NSUInteger count) {
-    CGFloat step=MIN(.07,.5/MAX(1.,(CGFloat)count-1));
-    return .04+(CGFloat)index*step;
+    CGFloat step=MIN(.05,.3/MAX(1.,(CGFloat)count-1));
+    return .02+(CGFloat)index*step;
 }
 // The pop-in setting: 0 one element after another (the dock's), 1 all together, 2 off.
 static int FMPopMode(void) {
@@ -1061,8 +1098,13 @@ static CGFloat FMSpringDamping(CGFloat response,CGFloat fraction) {
 // Long-press scrub, after the wloc dock. The row under the finger, given every
 // row's top and bottom in order; between rows the current one stays.
 static NSInteger FMScrubIndexAtY(CGFloat y,const CGFloat *tops,const CGFloat *bottoms,NSUInteger count,NSInteger current) {
-    for(NSUInteger index=0;index<count;index++)
-        if(y>=tops[index] && y<bottoms[index]) return (NSInteger)index;
+    NSUInteger low=0,high=count;
+    while(low<high) {
+        NSUInteger mid=low+(high-low)/2;
+        if(bottoms[mid]<=y) low=mid+1;
+        else high=mid;
+    }
+    if(low<count && y>=tops[low]) return (NSInteger)low;
     return current;
 }
 // The lens follows the finger but stays between the first and last row centers.
@@ -1086,6 +1128,26 @@ static CGFloat FMScrubScrollSpeed(CGFloat y,CGFloat top,CGFloat bottom,CGFloat s
     return fastest*(below-above);
 }
 // FMDrawerMotion:end
+// The drawer and settings preview apply the same outline in a disabled-actions transaction.
+static void FMSetDrawerOutline(UIView *glass,CALayer *shadow,UIBezierPath *outline) {
+    CAShapeLayer *clip=(CAShapeLayer *)glass.layer.mask;
+    if([clip isKindOfClass:CAShapeLayer.class]) clip.path=outline.CGPath;
+    for(CALayer *layer in glass.layer.sublayers)
+        if([layer isKindOfClass:CAShapeLayer.class] && [layer.name isEqualToString:@"fm.panel.rim"])
+            ((CAShapeLayer *)layer).path=outline.CGPath;
+    shadow.shadowPath=outline.CGPath;
+}
+
+@interface FMAppRowsStack : UIStackView
+@property(nonatomic,readonly) NSUInteger layoutGeneration;
+@end
+@implementation FMAppRowsStack
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _layoutGeneration++;
+}
+@end
+
 static BOOL FMClearGlassEnabled(void) {
     if(@available(iOS 26.0,*)) return BoolPref(@"clearGlass",NO);
     return NO;
@@ -1283,7 +1345,7 @@ static BOOL FMShouldEnforceScreenAwake(void) {
 // 历史：上游那套「把每个 window 的 frame/bounds 硬设成横屏矩形，再把方向掩码固定成
 // Portrait|LandscapeRight」的写法在 iOS 13+ 会和 UIWindowScene 的坐标系打架，表现为
 // 右横屏内容偏一侧 + 另一侧黑边；它还会和 TweakLoader 的每应用方向锁抢同一个方法，
-// 让竖屏 App 被强行旋转。本仓 v13 已经整块删过一次，换 1.0.40 源码时又带回来了，故再删。
+// 让竖屏 App 被强行旋转。本仓 v13 与 3.9.9 各删过一次，换 1.0.48 源码时又带回来了。
 static void FMInstallPowerHooks(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -1639,9 +1701,10 @@ static id FMScreenAwakeResignObserver=nil;
 
 // One element of the drawer popping in like the wloc dock icons: it starts
 // small, transparent and pushed toward the wall, then springs into place
-// (response .42 s, damping .62, about 8% overshoot). The model layer already
-// holds the final state; the backwards fill keeps the first frame in place
-// while the delay runs.
+// (response .42 s, damping .62, about 8% overshoot). The spring and its slight
+// overshoot are what make the stagger feel smooth and alive; flattening it into
+// a plain ease reads stiff. The model layer already holds the final state; the
+// backwards fill keeps the first frame in place while the delay runs.
 static void FMPopInLayer(CALayer *layer,CGFloat hidden,CFTimeInterval delay) {
     CGFloat stiffness=FMSpringStiffness(.42),damping=FMSpringDamping(.42,.62);
     NSArray<NSArray *> *specs=@[@[@"opacity",@0,@1],@[@"transform.scale",@.6,@1],
@@ -1754,6 +1817,7 @@ static void FMPopItems(NSArray<NSDictionary *> *items,NSArray<UIView *> *divider
 @property(nonatomic,copy) NSArray<UIView *> *appsHeaderTiles;
 @property(nonatomic,assign) BOOL appsScrollRestorePending;
 @property(nonatomic,assign) BOOL appsRefreshScheduled;
+@property(nonatomic,assign) BOOL inventoryRefreshPending;
 @property(nonatomic,assign) NSUInteger morphGeneration;
 @property(nonatomic,assign) NSUInteger launchGeneration;
 @property(nonatomic,assign) BOOL launchPending;
@@ -1807,6 +1871,9 @@ static void FMPopItems(NSArray<NSDictionary *> *items,NSArray<UIView *> *divider
 - (void)refreshUI;
 - (void)refreshAppsContent;
 - (void)requestAppsRefresh;
+- (void)refreshInventoryInBackground;
+- (BOOL)usesAdaptiveDrawer;
+- (BOOL)presentAdaptiveDrawer;
 - (void)persistAppsScroll;
 - (void)loadAppsScroll;
 - (void)rememberCurrentApp;
@@ -1817,6 +1884,7 @@ static void FMPopItems(NSArray<NSDictionary *> *items,NSArray<UIView *> *divider
 - (void)updateSettingsContent;
 - (void)appendResetStyleRow:(UIStackView *)stack;
 - (void)launchApp:(NSDictionary *)app;
+- (void)switchToApp:(NSDictionary *)app;
 - (void)invalidatePendingLaunch;
 - (void)showMessage:(NSString *)title details:(NSString *)detail;
 - (void)showMultitaskMenuExpanded:(BOOL)expanded;
@@ -1824,6 +1892,8 @@ static void FMPopItems(NSArray<NSDictionary *> *items,NSArray<UIView *> *divider
 - (void)syncScreenAwakeState;
 - (void)checkAutoLaunchLastAppIfNeeded;
 - (UIView *)switchRowWithTitle:(NSString *)title key:(NSString *)key defaultValue:(BOOL)def tag:(NSInteger)tag;
+- (void)settingHapticSlider:(UIStackView *)s;
+- (void)hapticSliderReleased:(UISlider *)slider;
 - (void)updateEasterEggSnowEffect;
 - (void)stopEasterEggSnowEffect;
 - (void)triggerEasterEggConfetti;
@@ -1852,7 +1922,7 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
     CGPoint _panStartPoint;
     CGPoint _panOriginalCenter;
     CGRect _panOriginalOrbFrame;
-    BOOL _panUsesDroplet,_panDropletTriggered;
+    BOOL _panUsesDroplet;
     BOOL _dropletPanelPrepared;
     BOOL _drawerSlideActive;
     CGPoint _drawerSlideRestCenter;
@@ -1876,19 +1946,21 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
     // Outline rate limiting: when the last exact outline was made, the progress it was made
     // at, how much overshoot the transform already carries, and the tick itself.
     CFTimeInterval _morphFrameAt,_morphFrameTick;
-    CGFloat _morphShownT,_morphShownStretch;
+    CGFloat _morphShownT;
     CGFloat _morphBeadAlpha,_morphShadow,_morphElapsed,_panelDragStart;
     CGFloat _morphScale,_morphOmega,_morphZeta;
     CFTimeInterval _morphTick;
     CADisplayLink *_morphLink;
     BOOL _morphCompact,_morphActive,_morphDragging,_morphOpening,_morphFromBead;
-    BOOL _morphCommitHaptic,_drawDeferred,_panUsesMorph,_panelDragLive;
+    BOOL _drawDeferred,_panUsesMorph,_panelDragLive;
     BOOL _popRevealed,_popStarted;
     // Long-press scrub: a glass lens over the app list.
     UIView *_scrubLens,*_scrubLabel;
     NSArray<UIView *> *_scrubRows;
     NSArray<UIControl *> *_scrubControls;
-    NSArray<NSValue *> *_scrubFrames;
+    NSData *_scrubEdges; // Sorted row tops, followed by row bottoms, in stack coordinates.
+    __weak FMAppRowsStack *_scrubStack;
+    NSUInteger _scrubLayoutGeneration;
     CGRect _scrubViewport;
     CGFloat _scrubFirstMid,_scrubLastMid,_scrubHalf,_scrubStartY;
     CGPoint _scrubPoint;
@@ -1896,7 +1968,6 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
     CFTimeInterval _scrubScrollTick;
     NSInteger _scrubIndex;
     BOOL _scrubActive,_scrubCancelling;
-    UISelectionFeedbackGenerator *_scrubTick;
     BOOL _hiddenAppsExpanded;
 }
 + (instancetype)shared {
@@ -2016,13 +2087,14 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
 - (void)handleOrientationOrLayoutChange {
     if(_isPanning) return;
     [self refreshLayoutForOrientation];
-    // 旋转动画期间场景边界会跳几次，先贴一次，再等它稳定后补两次。
-    for(NSNumber *delay in @[@0.12, @0.35]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay.doubleValue*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-            if(self->_isPanning) return;
-            [self refreshLayoutForOrientation];
-        });
-    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.12*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        if(self->_isPanning) return;
+        [self refreshLayoutForOrientation];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.35*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        if(self->_isPanning) return;
+        [self refreshLayoutForOrientation];
+    });
 }
 - (void)refreshLayoutForOrientation {
     if(_isPanning || !self.window) return;
@@ -2126,14 +2198,23 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
         nightBacking.userInteractionEnabled=NO;
         [material.contentView addSubview:nightBacking];
     }
-    // LC's colorful app cards and translucent TabView show through the
-    // native drawer. Give only the host drawer a light readability backing.
-    if(strong && FMHostUI()) {
+    // Regular glass adapts to the sampled background on iOS 26+.
+    // A dark drawer over a light host/guest used the same weak backing as
+    // daytime, so the light application could visibly wash through it.
+    // Keep daytime and the explicit Clear setting's lighter treatment intact.
+    //
+    // 精简模式保持原样：窄抽屉里那层不透明的夜间底把磨砂压成了实心色块，
+    // 拖拽时尤其明显。这一档只做宿主界面原有的轻微底衬。
+    BOOL compactDrawer=BoolPref(@"compactMode",NO);
+    BOOL wantsBacking=strong && (FMHostUI() || (nativeGlass && FMMenuDark() && !compactDrawer));
+    if(wantsBacking) {
         UIView *backing=[[UIView alloc] initWithFrame:material.contentView.bounds];
         backing.tag=9231; // Material backing, not content: the drawer morph leaves it alone.
         backing.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-        backing.backgroundColor=[FMThemeColor(FMColorSurface) colorWithAlphaComponent:
-            clear?.42:.26];
+        BOOL night=FMMenuDark() && !compactDrawer;
+        UIColor *base=night?FMThemeColor(FMColorBackground):FMThemeColor(FMColorSurface);
+        CGFloat opacity=night?(clear?.56:.74):(clear?.42:.26);
+        backing.backgroundColor=[base colorWithAlphaComponent:opacity];
         backing.userInteractionEnabled=NO;
         [material.contentView addSubview:backing];
     }
@@ -2406,15 +2487,13 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
 }
 - (void)hold:(UILongPressGestureRecognizer *)gesture {
     if(gesture.state!=UIGestureRecognizerStateBegan) return;
-    if(BoolPref(@"haptic",YES)) [[[UIImpactFeedbackGenerator alloc]
-        initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+    FMHaptic(UIImpactFeedbackStyleMedium,.55);
     FMLog(@"settings-gesture",@"orb-long-press");
     [self openSettings];
 }
 - (void)holdPanel:(UILongPressGestureRecognizer *)gesture {
     if(gesture.state!=UIGestureRecognizerStateBegan) return;
-    if(BoolPref(@"haptic",YES)) [[[UIImpactFeedbackGenerator alloc]
-        initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+    FMHaptic(UIImpactFeedbackStyleMedium,.55);
     FMLog(@"settings-gesture",@"panel-long-press");
     [self openSettings];
 }
@@ -2434,6 +2513,10 @@ static UIImage *FMLogoBadgeImage(CGFloat diameter) {
         self.isOpen=NO;
         [self removePanel];
         [self.orb removeFromSuperview];self.orb=nil;
+        return;
+    }
+    if(self.isOpen && [self.page isEqualToString:@"apps"] && [self usesAdaptiveDrawer]) {
+        [self presentAdaptiveDrawer];
         return;
     }
     [self removePanel];
@@ -2586,8 +2669,9 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
         // With Reduce Motion nothing follows the finger: a long enough pull
         // opens the drawer once it is let go.
         BOOL capsule=FMOrbHandleIsCapsule();
-        _panUsesDroplet=!capsule && BoolPref(@"orbDropletPull",NO) && !UIAccessibilityIsReduceMotionEnabled();
-        _panUsesMorph=capsule && !UIAccessibilityIsReduceMotionEnabled();
+        BOOL adaptive=[self usesAdaptiveDrawer];
+        _panUsesDroplet=!adaptive && !capsule && BoolPref(@"orbDropletPull",NO) && !UIAccessibilityIsReduceMotionEnabled();
+        _panUsesMorph=!adaptive && capsule && !UIAccessibilityIsReduceMotionEnabled();
         [self.orb.layer removeAllAnimations];
         UIView *glass=[self.orb viewWithTag:9202];
         [glass.layer.mask removeAnimationForKey:@"fm.droplet.return"];
@@ -2596,13 +2680,11 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
         _panStartPoint=CGPointMake(p.x-translation.x,p.y-translation.y);
         _panOriginalCenter=self.orb.center;
         _panOriginalOrbFrame=self.orb.frame;
-        _panDropletTriggered=NO;
         _panOriginalLeft=self.left;
         _panMaxInwardDist=0;
         _panMaxVerticalDist=0;
         _panIsRepositioning=NO;
         _panIsInwardPull=NO;
-        _morphCommitHaptic=NO;
         [self cancelOrbFade];
         self.orbFaded=NO;
         self.orb.alpha=1;
@@ -2673,32 +2755,17 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
             CGFloat pull=FMDropletPullDistance(inwardDist,FMOrbScale());
             if(_panIsInwardPull || _dropletPullLink)
                 [self updateDropletPull:pull offsetY:(p.y-_panStartPoint.y)*.14];
-            if(pull>=36*FMOrbScale() && !_panDropletTriggered) {
-                _panDropletTriggered=YES;
-                if(BoolPref(@"haptic",YES)) [[[UIImpactFeedbackGenerator alloc]
-                    initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
-            }
+            // No haptic while the pull crosses the trigger distance: the drawer has not
+            // opened yet, and buzzing here as well as on release reads as two taps.
         } else if(_panUsesMorph && (_morphActive || (_panIsInwardPull && [self beginDrawerDragFromBead]))) {
             // === 抽屉从微珠里长出来，内侧边与手指一比一 ===
             [self applyMorphProgress:FMRubberProgress(inwardDist/_morphTravel)];
-            if(inwardDist>=_morphCommit) {
-                if(!_morphCommitHaptic && BoolPref(@"haptic",YES))
-                    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-                _morphCommitHaptic=YES;
-            } else if(inwardDist<_morphCommit*.8) _morphCommitHaptic=NO;
         } else if(_panUsesMorph && !_panIsInwardPull) {
             // Not pulling inward yet: the bead stays exactly where it is.
         } else {
             // No drawer follows the finger (Reduce Motion, or none could be built):
-            // the pull is judged when the finger lifts; passing the distance is
-            // marked once.
+            // the pull is judged when the finger lifts.
             _panUsesMorph=NO;
-            CGFloat commit=FMQuietPullDistance(FMOrbScale());
-            if(inwardDist>=commit) {
-                if(!_morphCommitHaptic && BoolPref(@"haptic",YES))
-                    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-                _morphCommitHaptic=YES;
-            } else if(inwardDist<commit*.8) _morphCommitHaptic=NO;
         }
     } else if(g.state==UIGestureRecognizerStateEnded) {
         _isPanning=NO;
@@ -2766,9 +2833,6 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
             // === 没有抽屉跟手（减少动态效果，或抽屉造不出来）：按松手时的拉动距离判断 ===
             CGFloat pulled=_panOriginalLeft?(p.x-_panStartPoint.x):(_panStartPoint.x-p.x);
             if(FMDrawerShouldOpenAfterPull(pulled,FMQuietPullDistance(FMOrbScale()),inwardV,finalVerticalDist,finalTotalDist)) {
-                if(BoolPref(@"haptic", YES)) {
-                    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-                }
                 if(!self.isOpen) {
                     if(_dropletPanelPrepared) [self openDrawerFromDroplet];
                     else [self toggle];
@@ -2798,13 +2862,7 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     FMLog(self.isOpen?@"menu-open":@"menu-close",nil);
     [self.orbitContext.events publish:@"orbit.floatingMenu.visibility"
                           payload:@{@"open":@(self.isOpen),@"guestID":GuestID()}];
-    if(BoolPref(@"haptic",YES)) {
-        if(@available(iOS 13.0,*)) {
-            [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid] impactOccurredWithIntensity:.65];
-        } else {
-            [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-        }
-    }
+    FMHaptic(UIImpactFeedbackStyleRigid,.45);
 }
 // A pull that was let go far enough: the state flips now, the spring finishes.
 // The fading bead must not be grabbable again while the drawer comes out (the
@@ -2829,6 +2887,13 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     [self stopDropletPull];
     [self endScrubAnimated:NO];
     BOOL opening=!self.isOpen;
+    if(opening && [self usesAdaptiveDrawer]) {
+        [self cancelOrbFade];
+        // The adaptive switcher bypasses announceDrawerState. Confirm only a
+        // successful user opening, never a redraw or a failed presentation.
+        if([self presentAdaptiveDrawer]) FMHaptic(UIImpactFeedbackStyleRigid,.45);
+        return;
+    }
     if(opening) {
         [self cancelOrbFade];
         [self loadAppsScroll];
@@ -2889,11 +2954,9 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     _morphTravel=MAX(1,self.left?CGRectGetMaxX(rest)-CGRectGetMaxX(bead):CGRectGetMinX(bead)-CGRectGetMinX(rest));
     // A large bead on a narrow drawer must still be able to reach the commit line.
     _morphCommit=MIN(FMDrawerCommitDistance(_morphTravel,FMOrbScale()),_morphTravel*.8);
-    _morphCommitHaptic=NO;
     _morphBeadAlpha=self.orbUpdateAvailable?1:(self.orbNormalAlpha?:.72);
     _morphFrameAt=0;
-    _morphShownT=0;
-    _morphShownStretch=0;
+    _morphShownT=-1;
     // One outline rebuild per display frame is all a drag can show; faster input than the
     // screen would only be thrown away.
     CGFloat maximum=UIScreen.mainScreen.maximumFramesPerSecond;
@@ -2915,9 +2978,10 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     // rated at the display rate: an interior frame keeps the outline it already has and only
     // moves it, the first frame and the last one are always exact.
     BOOL ends=(t<=0||t>=1),fresh=NO;
-    if(ends || !clip.path || (_morphShownT<=1e-4 && t>0)) {
+    BOOL changed=t!=_morphShownT || !clip.path;
+    if(changed && (ends || !clip.path || _morphShownT<=1e-4)) {
         fresh=YES;
-    } else if(CACurrentMediaTime()-_morphFrameAt>=_morphFrameTick) {
+    } else if(changed && CACurrentMediaTime()-_morphFrameAt>=_morphFrameTick) {
         fresh=YES;
     }
     if(fresh) {
@@ -2927,20 +2991,15 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
             FMDrawerMorphPath(glass.bounds,_morphBead,_morphDroplet,_morphDrawer,self.left,_morphCompact,t);
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
-        clip.path=outline.CGPath;
-        for(CALayer *layer in glass.layer.sublayers)
-            if([layer.name isEqualToString:@"fm.panel.rim"] && [layer isKindOfClass:CAShapeLayer.class])
-                ((CAShapeLayer *)layer).path=outline.CGPath;
-        panel.layer.shadowPath=outline.CGPath;
+        FMSetDrawerOutline(glass,panel.layer,outline);
         [CATransaction commit];
         // The outline matches this progress exactly, so the transform only carries overshoot.
         _morphShownT=t;
-        _morphShownStretch=0;
     }
     // A frame that was skipped is caught up by scaling the drawer the last exact frame was
     // measured for. Between those two the shapes differ by a few points, which reads as the
     // same shape moving rather than as a jump.
-    CGFloat along=_morphShownT>1e-4?t/_morphShownT:1,owed=stretch-_morphShownStretch;
+    CGFloat along=_morphShownT>1e-4?t/_morphShownT:1,owed=stretch;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     // Stretch about the docking wall: scaling about the center moves the wall
@@ -3053,20 +3112,34 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     [self applyMorphProgress:0];
     return YES;
 }
+// Hides or restores the drawer contents without touching the material backing,
+// so the shell can land first and the items pop in afterwards. The panel is
+// passed explicitly: during a slide the manager may already hold a newer one.
+- (void)setDrawerContentsHidden:(BOOL)hidden inPanel:(UIView *)panel {
+    UIView *content=FMGlassContent([panel viewWithTag:9230]);
+    for(UIView *child in content.subviews)
+        if(child.tag!=9217 && child.tag!=9231) child.alpha=hidden?0:1;
+}
 // Water handles use the 1.0.13 entrance: the complete drawer slides in as one
-// piece, with its final outline and content already in place.
+// piece, with its final outline already in place, and the items come in on the
+// same beat rather than after it. Hiding them until the shell landed left the
+// user looking at an empty drawer that filled up afterwards, which reads as two
+// separate events instead of one motion.
 - (void)slideDropletDrawerOpen {
     UIView *drawer=self.panel;
     if(!drawer) return;
+    int popMode=FMPopMode();
+    BOOL instant=popMode==2 || UIAccessibilityIsReduceMotionEnabled();
     _morphActive=YES;_morphDragging=NO;_morphOpening=YES;_morphFromBead=NO;
     _morphTarget=1;
     _drawerSlideActive=YES;
     _drawerSlideRestCenter=drawer.center;
     _popRevealed=YES;_popStarted=YES;
+    [self setDrawerContentsHidden:NO inPanel:drawer];
     drawer.hidden=NO;self.dismissLayer.hidden=NO;
     drawer.userInteractionEnabled=NO;self.dismissLayer.userInteractionEnabled=NO;
     self.orb.alpha=0;self.orb.userInteractionEnabled=NO;
-    if(FMPopMode()==2 || UIAccessibilityIsReduceMotionEnabled()) {
+    if(instant) {
         self.dismissLayer.alpha=1;
         [self finishDrawerMorph];
         return;
@@ -3077,6 +3150,9 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     drawer.center=CGPointMake(destination.x+(self.left?-travel:travel),destination.y);
     self.dismissLayer.alpha=0;
     NSUInteger generation=++self.morphGeneration;
+    // The items ride along with the shell: the stagger starts on this frame while
+    // the drawer is still travelling, so the content arrives with it.
+    [self popContent:YES];
     [UIView animateWithDuration:.36 delay:0 usingSpringWithDamping:.86
         initialSpringVelocity:.3 options:UIViewAnimationOptionBeginFromCurrentState
         animations:^{
@@ -3093,8 +3169,19 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
         [self slideDropletDrawerOpen];
         return;
     }
-    if(FMPopMode()==2 || UIAccessibilityIsReduceMotionEnabled() || ![self prepareDrawerMorph]) {
+    if(FMPopMode()==2 || UIAccessibilityIsReduceMotionEnabled()) {
         if(!open) [self draw];
+        return;
+    }
+    // A shell that is already on screen but cannot morph would otherwise open
+    // with no animation at all, making all three pop-in settings look alike.
+    if(![self prepareDrawerMorph]) {
+        if(!open) { [self draw]; return; }
+        // Land the drawer in its final state, then let the items pop in from it.
+        _morphOpening=YES;_morphTarget=1;_morphFromBead=NO;_morphActive=NO;
+        _popRevealed=YES;_popStarted=YES;
+        [self popContent:YES];
+        [self finishDrawerMorph];
         return;
     }
     _morphFromBead=NO;
@@ -3184,6 +3271,8 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     _drawDeferred=NO;
     if(_drawerSlideActive) {
         self.morphGeneration++;
+        [self setDrawerContentsHidden:NO inPanel:self.panel];
+        _popRevealed=YES;_popStarted=YES;
         [self.panel.layer removeAllAnimations];
         self.panel.center=_drawerSlideRestCenter;
         [self.dismissLayer.layer removeAllAnimations];
@@ -3286,7 +3375,9 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
 }
 // point is in the scroll view's own coordinates.
 - (NSUInteger)scrubRowIndexAtPoint:(CGPoint)point {
-    NSArray<UIView *> *rows=[self scrubRowsWithControls:nil];
+    return [self scrubRowIndexAtPoint:point rows:[self scrubRowsWithControls:nil]];
+}
+- (NSUInteger)scrubRowIndexAtPoint:(CGPoint)point rows:(NSArray<UIView *> *)rows {
     for(NSUInteger index=0;index<rows.count;index++)
         if(CGRectContainsPoint([rows[index] convertRect:rows[index].bounds toView:self.appsScroll],point)) return index;
     return NSNotFound;
@@ -3346,9 +3437,12 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     _scrubLabel=holder;
 }
 // The app under the lens grows; the one it left settles back.
-- (void)scrubFocus:(NSInteger)index {
+- (void)scrubFocus:(NSInteger)index previous:(NSInteger)previous {
     BOOL calm=UIAccessibilityIsReduceMotionEnabled();
-    for(NSUInteger row=0;row<_scrubRows.count;row++) {
+    NSInteger affected[]={previous,index};
+    for(NSUInteger i=0;i<2;i++) {
+        NSInteger row=affected[i];
+        if(row<0 || row>=(NSInteger)_scrubRows.count) continue;
         UIView *icon=[_scrubRows[row] viewWithTag:9233];
         CGAffineTransform want=(NSInteger)row==index?CGAffineTransformMakeScale(1.16,1.16):CGAffineTransformIdentity;
         if(!icon || CGAffineTransformEqualToTransform(icon.transform,want)) continue;
@@ -3363,10 +3457,12 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     UIView *glass=[self.panel viewWithTag:9230],*content=FMGlassContent(glass);
     NSArray<UIControl *> *controls=nil;
     NSArray<UIView *> *rows=[self scrubRowsWithControls:&controls];
-    NSUInteger found=[self scrubRowIndexAtPoint:[g locationInView:self.appsScroll]];
+    NSUInteger found=[self scrubRowIndexAtPoint:[g locationInView:self.appsScroll] rows:rows];
     if(!glass || content==glass || found==NSNotFound || !self.isOpen || _morphActive) return;
     [glass layoutIfNeeded];
     _scrubRows=rows;_scrubControls=controls;
+    _scrubStack=(FMAppRowsStack *)rows[found].superview;
+    _scrubEdges=nil;
     _scrubViewport=[self.appsScroll convertRect:self.appsScroll.bounds toView:glass];
     _scrubIndex=(NSInteger)found;
     _scrubCancelling=NO;_scrubActive=YES;
@@ -3391,43 +3487,57 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
             options:UIViewAnimationOptionAllowUserInteraction
             animations:^{ lens.alpha=1;lens.transform=CGAffineTransformIdentity; } completion:nil];
     }
-    [self scrubFocus:_scrubIndex];
-    if(BoolPref(@"haptic",YES)) {
-        [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft] impactOccurredWithIntensity:.9];
-        _scrubTick=[UISelectionFeedbackGenerator new];
-        [_scrubTick prepare];
-    }
+    [self scrubFocus:_scrubIndex previous:-1];
+    FMHaptic(UIImpactFeedbackStyleSoft,.45);
 }
-// Where every row is now, and how far the lens may travel: between the centres of the
-// first and last row in view. A long list scrolls under a sliding finger, so this is
-// measured again each time.
+// Scroll offsets change the viewport, while row edges stay in stack coordinates.
 - (void)scrubMeasure {
+    FMAppRowsStack *stack=_scrubStack;
     UIView *glass=[self.panel viewWithTag:9230];
-    NSMutableArray<NSValue *> *frames=[NSMutableArray array];
-    CGFloat first=CGFLOAT_MAX,last=-CGFLOAT_MAX;
-    for(UIView *row in _scrubRows) {
-        CGRect frame=[row convertRect:row.bounds toView:glass];
-        [frames addObject:[NSValue valueWithCGRect:frame]];
-        if(!CGRectIntersectsRect(frame,_scrubViewport)) continue;
-        first=MIN(first,CGRectGetMidY(frame));
-        last=MAX(last,CGRectGetMidY(frame));
+    NSUInteger count=_scrubRows.count;
+    if(!stack || !glass || !count) return;
+    if(!_scrubEdges || stack.layoutGeneration!=_scrubLayoutGeneration) {
+        NSMutableData *edges=[NSMutableData dataWithLength:2*count*sizeof(CGFloat)];
+        CGFloat *values=edges.mutableBytes;
+        for(NSUInteger i=0;i<count;i++) {
+            CGRect frame=_scrubRows[i].frame;
+            values[i]=CGRectGetMinY(frame);
+            values[count+i]=CGRectGetMaxY(frame);
+        }
+        _scrubEdges=edges;
+        _scrubLayoutGeneration=stack.layoutGeneration;
     }
-    _scrubFrames=frames;
-    _scrubFirstMid=MAX(CGRectGetMinY(_scrubViewport)+_scrubHalf,first);
-    _scrubLastMid=MIN(CGRectGetMaxY(_scrubViewport)-_scrubHalf,last);
+    UIScrollView *scroll=self.appsScroll;
+    _scrubViewport=[scroll convertRect:scroll.bounds toView:glass];
+    CGRect visible=[scroll convertRect:scroll.bounds toView:stack];
+    const CGFloat *tops=_scrubEdges.bytes,*bottoms=tops+count;
+    NSUInteger low=0,high=count;
+    while(low<high) {
+        NSUInteger mid=low+(high-low)/2;
+        if(bottoms[mid]<=CGRectGetMinY(visible)) low=mid+1; else high=mid;
+    }
+    NSUInteger first=low;
+    high=count;
+    while(low<high) {
+        NSUInteger mid=low+(high-low)/2;
+        if(tops[mid]<CGRectGetMaxY(visible)) low=mid+1; else high=mid;
+    }
+    _scrubFirstMid=CGRectGetMinY(_scrubViewport)+_scrubHalf;
+    _scrubLastMid=CGRectGetMaxY(_scrubViewport)-_scrubHalf;
+    if(first<low) {
+        NSUInteger last=low-1;
+        CGPoint a=[stack convertPoint:CGPointMake(0,(tops[first]+bottoms[first])*.5) toView:glass];
+        CGPoint b=[stack convertPoint:CGPointMake(0,(tops[last]+bottoms[last])*.5) toView:glass];
+        _scrubFirstMid=MAX(_scrubFirstMid,a.y);
+        _scrubLastMid=MIN(_scrubLastMid,b.y);
+    }
 }
-// The row under y (the lens centre), among the rows in view only: a row scrolled out of
-// sight has a frame over the header or footer, and must not be picked from there.
 - (NSInteger)scrubIndexAtLensY:(CGFloat)y {
-    NSUInteger count=_scrubFrames.count;
-    CGFloat tops[count+1],bottoms[count+1];
-    for(NSUInteger index=0;index<count;index++) {
-        CGRect frame=_scrubFrames[index].CGRectValue;
-        BOOL visible=CGRectIntersectsRect(frame,_scrubViewport);
-        tops[index]=visible?CGRectGetMinY(frame):CGFLOAT_MAX;
-        bottoms[index]=visible?CGRectGetMaxY(frame):-CGFLOAT_MAX;
-    }
-    return FMScrubIndexAtY(y,tops,bottoms,count,_scrubIndex);
+    if(!_scrubEdges || !_scrubStack || y<CGRectGetMinY(_scrubViewport) || y>=CGRectGetMaxY(_scrubViewport)) return _scrubIndex;
+    UIView *glass=[self.panel viewWithTag:9230];
+    CGFloat local=[_scrubStack convertPoint:CGPointMake(0,y) fromView:glass].y;
+    const CGFloat *tops=_scrubEdges.bytes;
+    return FMScrubIndexAtY(local,tops,tops+_scrubRows.count,_scrubRows.count,_scrubIndex);
 }
 // Puts the focus and the lens where the finger is, and on whichever row is now under the
 // lens when the list has moved beneath a finger that stayed put.
@@ -3439,13 +3549,14 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     CGFloat lensY=FMScrubLensCenter(point.y,_scrubFirstMid,_scrubLastMid);
     NSInteger index=[self scrubIndexAtLensY:lensY];
     BOOL outside=FMScrubIsOutside(point.x,CGRectGetWidth(glass.bounds));
-    BOOL moved=index!=_scrubIndex,flipped=outside!=_scrubCancelling;
+    NSInteger previous=_scrubIndex;
+    BOOL moved=index!=previous,flipped=outside!=_scrubCancelling;
     _scrubIndex=index;
     _scrubCancelling=outside;
     if(moved) {
-        [_scrubTick selectionChanged];
-        [_scrubTick prepare];
-        [self scrubFocus:index];
+        // A lighter tick than the open/close confirmation so a scrub reads as texture.
+        FMHaptic(UIImpactFeedbackStyleLight,.22);
+        [self scrubFocus:index previous:previous];
     } else if(flipped) [self updateScrubLabel];
     // The lens follows the finger on a short spring; leaving the drawer shrinks and dims it.
     UIView *lens=_scrubLens;
@@ -3520,7 +3631,7 @@ static CGFloat FMDropletPullDistance(CGFloat inward,CGFloat scale) {
     UIView *lens=_scrubLens,*label=_scrubLabel;
     NSArray<UIView *> *rows=_scrubRows;
     _scrubActive=NO;_scrubCancelling=NO;
-    _scrubLens=nil;_scrubLabel=nil;_scrubRows=nil;_scrubControls=nil;_scrubFrames=nil;_scrubTick=nil;
+    _scrubLens=nil;_scrubLabel=nil;_scrubRows=nil;_scrubControls=nil;_scrubEdges=nil;_scrubStack=nil;
     [_scrubLink invalidate];
     _scrubLink=nil;
     void (^settle)(void)=^{
@@ -3617,13 +3728,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     }
     return light;
 }
-// The icon is a full interactive control: tapping it switches immediately,
-// and long pressing it toggles hidden state. Since it is a UIButton, the
-// scroll view's scrub lens recognizer naturally yields (![hit isKindOfClass:UIButton.class]).
-- (UIView *)iconViewForApp:(NSDictionary*)app size:(CGFloat)size {
-    UIButton *box=[UIButton buttonWithType:UIButtonTypeCustom];
-    box.frame=CGRectMake(0,0,size,size);
-    box.tag=9233; // The long-press scrub enlarges the icon under its lens.
+static void FMDrawAppIcon(UIView *box,NSDictionary *app,CGFloat size,BOOL current) {
     box.layer.cornerRadius=size*.225;
     if (@available(iOS 13.0, *)) {
         box.layer.cornerCurve=kCACornerCurveContinuous;
@@ -3651,7 +3756,6 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
         fallback.userInteractionEnabled=NO;
         [box addSubview:fallback];
     }
-    BOOL current=[LCOrbitGuestService isCurrentGuest:app];
     BOOL blocked=![app[@"launchable"] boolValue] && ![app[@"builtin"] boolValue];
     BOOL hidden=[app[@"hidden"] boolValue];
     BOOL locked=[app[@"locked"] boolValue];
@@ -3717,6 +3821,14 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
         [box addSubview:mark];
     }
 
+}
+
+- (UIView *)iconViewForApp:(NSDictionary*)app size:(CGFloat)size {
+    UIButton *box=[UIButton buttonWithType:UIButtonTypeCustom];
+    box.frame=CGRectMake(0,0,size,size);
+    box.tag=9233; // The long-press scrub enlarges the icon under its lens.
+    BOOL current=[LCOrbitGuestService isCurrentGuest:app];
+    FMDrawAppIcon(box,app,size,current);
     objc_setAssociatedObject(box,@selector(switchFromRow:),app,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [box addTarget:self action:@selector(switchFromRow:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -3733,7 +3845,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     BOOL current=[app[@"hidden"] boolValue];
     BOOL target=!current;
     if(FMSetAppHidden(app, target)) {
-        if(BoolPref(@"haptic", YES)) {
+        if(HapticStrength()>0) {
             if(@available(iOS 13.0, *)) {
                 [[[UINotificationFeedbackGenerator alloc] init] notificationOccurred:UINotificationFeedbackTypeSuccess];
             }
@@ -3816,8 +3928,9 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     [container addSubview:close];
     return container;
 }
-- (UIStackView *)stack {
-    UIStackView *s=[UIStackView new]; s.axis=UILayoutConstraintAxisVertical;
+- (UIStackView *)stack { return [self stackOfClass:UIStackView.class]; }
+- (UIStackView *)stackOfClass:(Class)stackClass {
+    UIStackView *s=[stackClass new]; s.axis=UILayoutConstraintAxisVertical;
     s.spacing=9; s.alignment=UIStackViewAlignmentFill; s.distribution=UIStackViewDistributionFill;
     s.translatesAutoresizingMaskIntoConstraints=NO;
     return s;
@@ -3965,7 +4078,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
         scroll.clipsToBounds=YES;
         [self buildAppFooter:glass];
     }
-    UIStackView *stack=[self stack];
+    UIStackView *stack=small?[self stackOfClass:FMAppRowsStack.class]:[self stack];
     stack.spacing=small?(compact?3:4):10;
     [scroll addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
@@ -4315,11 +4428,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
 
 - (void)toggleHiddenAppsExpansion {
     _hiddenAppsExpanded = !_hiddenAppsExpanded;
-    if(BoolPref(@"haptic", YES)) {
-        if(@available(iOS 13.0, *)) {
-            [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-        }
-    }
+    FMHaptic(UIImpactFeedbackStyleLight,.40);
     [UIView transitionWithView:self.appsScroll duration:0.32 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
         [self refreshAppsContent];
     } completion:nil];
@@ -4549,10 +4658,33 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     if(self.settingsWindow) [self updateSettingsContent];
     else [self draw];
 }
+- (void)refreshInventoryInBackground {
+    if(self.inventoryRefreshPending || !self.window) return;
+    self.inventoryRefreshPending=YES;
+    UIWindow *window=self.window;
+    NSArray *previousApps=self.apps;
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        NSArray *apps=nil;
+        [LCOrbitStorage beginReadSnapshot:nil];
+        @try { apps=InstalledApps(); }
+        @finally { [LCOrbitStorage endReadSnapshot]; }
+        dispatch_async(dispatch_get_main_queue(),^{
+            typeof(self) manager=weakSelf;
+            if(!manager) return;
+            manager.inventoryRefreshPending=NO;
+            if(manager.window!=window || manager.apps!=previousApps) return;
+            manager.apps=apps?:@[];
+            if(manager.isOpen && manager.panel) [manager requestAppsRefresh];
+        });
+    });
+}
 // A task closing changes only the running badges/actions, not the drawer's
 // glass, layout, handle, or scroll view. Update those rows in-place instead
 // of tearing down the entire overlay (which caused a visible glass flash).
 - (void)refreshAppsContent {
+    FMBeginPreferenceSnapshot();
+    @try {
     if(!self.isOpen || !self.panel || !self.appsScroll ||
        ![self.page isEqualToString:@"apps"]) return;
     UIScrollView *scroll=self.appsScroll;
@@ -4575,6 +4707,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
                           scroll.adjustedContentInset.bottom);
     [scroll setContentOffset:CGPointMake(0,MIN(MAX(0,saved),maxY)) animated:NO];
     self.appsScrollRestorePending=NO;
+    } @finally { FMEndPreferenceSnapshot(); }
 }
 - (void)requestAppsRefresh {
     // didActivateWindow and forgetWindow may notify during one close. Merge
@@ -4590,9 +4723,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
 }
 - (void)holdHomeButton:(UILongPressGestureRecognizer *)gesture {
     if(gesture.state!=UIGestureRecognizerStateBegan) return;
-    if(BoolPref(@"haptic",YES)) {
-        [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-    }
+    FMHaptic(UIImpactFeedbackStyleLight,.40);
     FMLog(@"settings-gesture",@"home-button-long-press");
     [self openSettings];
 }
@@ -4748,17 +4879,32 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
         [self spacer:s size:16];
         [self diyPage:s];
     } else if([category isEqualToString:@"behavior"]) {
-        if(FMHostUI()) {
+        {
             [self section:@"多任务" sub:@"开启后切换 App 会保留其他任务；子任务不需要单独启用微珠。" in:s];
             [self settingSwitch:s title:@"开启多任务" key:@"fullscreenMultitask" defaultValue:NO tag:19];
-            [self section:@"多任务切换模式" sub:@"系统模式沿用 LC 窗口设置并隐藏微珠；微珠模式全屏切换，需要在 LC 设置中选择虚拟窗口，不会自动修改 LC 设置。" in:s];
-            UISegmentedControl *mode=[[UISegmentedControl alloc] initWithItems:@[@"系统（LC）",@"微珠"]];
-            mode.selectedSegmentIndex=[LCOrbitMultitask usesSystemMenu]?0:1;
-            mode.enabled=[LCOrbitMultitask isEnabled];
+            [self section:@"多任务切换模式" sub:@"iPhone 和 iPad 都可选用阶梯卡片或 iPad 布局。iPad 布局在支持多窗口时交给系统，单窗口宿主中以 LC 网格呈现。" in:s];
+            UISegmentedControl *mode=[[UISegmentedControl alloc] initWithItems:@[@"系统（LC）",@"微珠",@"自适应"]];
+            mode.selectedSegmentIndex=[LCOrbitMultitask usesAdaptiveSwitcher]?2:([LCOrbitMultitask usesSystemMenu]?0:1);
+            mode.enabled=FMHostUI() && [LCOrbitMultitask isEnabled];
             mode.accessibilityLabel=@"多任务切换菜单";
             [mode addTarget:self action:@selector(multitaskModeChanged:) forControlEvents:UIControlEventValueChanged];
             [self addRow:mode height:38 to:s];
+            if([LCOrbitMultitask usesAdaptiveSwitcher]) {
+                UISegmentedControl *presentation=[[UISegmentedControl alloc] initWithItems:@[@"iPhone",@"iPad"]];
+                presentation.selectedSegmentIndex=[LCOrbitMultitask taskSwitcherPresentation];
+                presentation.accessibilityLabel=@"自适应任务切换呈现方式";
+                [presentation addTarget:self action:@selector(multitaskPresentationChanged:) forControlEvents:UIControlEventValueChanged];
+                [self addRow:presentation height:38 to:s];
+                if(![LCOrbitMultitask usesNativeTaskWindows]) {
+                    [self spacer:s size:10];
+                    [self settingSwitch:s title:@"仅当前任务显示实时画面" key:@"adaptiveActivePreviewOnly" defaultValue:NO tag:27];
+                    [self spacer:s size:10];
+                    [self section:@"自适应 Dock 位置" sub:@"向右移动滑块可将 Dock 上移，0 为最贴近底部安全区；重新打开切换界面后生效。" in:s];
+                    [self settingSlider:s title:@"距底部距离" key:@"adaptiveDockBottomGap" min:0 max:80 def:4 tag:112];
+                }
+            }
             [self spacer:s size:14];
+            if(!FMHostUI()) [self note:@"多任务需要运行在 LiveContainer 本体：在 LiveContainer 设置里连点版本号 5 次进入开发者模式，开启「Load Tweaks to LiveContainer Itself」。" in:s];
         }
         [self section:@"屏幕与旋转" sub:@"播放视频或挂机时保持屏幕常亮，防止自动息屏。" in:s];
         UIView *sw3=[self switchRowWithTitle:@"保持屏幕常亮" key:@"keepScreenAwake" defaultValue:NO tag:23];
@@ -4766,7 +4912,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
         if(rotCard) [s addArrangedSubview:rotCard];
         [self spacer:s size:14];
         [self section:@"悬浮控件" sub:nil in:s];
-        [self settingSwitch:s title:@"触觉反馈" key:@"haptic" defaultValue:YES tag:1];
+        [self settingHapticSlider:s];
         [self spacer:s size:14];
         [self section:@"应用切换" sub:nil in:s];
         UIView *sw4=[self switchRowWithTitle:@"最近打开的 App 置顶" key:@"recentAppsFirst" defaultValue:NO tag:20];
@@ -4924,7 +5070,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     l.minimumScaleFactor=.79;
     [row addSubview:l];
     UISwitch *sw=[UISwitch new]; sw.on=BoolPref(key,def); sw.tag=tag;
-    if(tag==19) sw.enabled=[[LCOrbitCore sharedCore] isModuleEnabled:@"FloatingMenu"];
+    if(tag==19) sw.enabled=FMHostUI() && [[LCOrbitCore sharedCore] isModuleEnabled:@"FloatingMenu"];
     sw.translatesAutoresizingMaskIntoConstraints=NO;
     sw.onTintColor=FMSwitchGreen();
     [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
@@ -4943,11 +5089,58 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     UIView *card=FMCreateGroupedCard(@[row],16);
     if(card) [s addArrangedSubview:card];
 }
+// A switch can only say off or on. The slider keeps that off position at its left
+// end, puts the old fixed feel in the middle and lets the right end reach twice
+// the intensity. Only the release writes, so dragging does not hammer the config
+// file, and the touch that lands the value previews the new strength.
+- (void)settingHapticSlider:(UIStackView*)s {
+    UIView *row=[UIView new];
+    row.translatesAutoresizingMaskIntoConstraints=NO;
+    [row.heightAnchor constraintEqualToConstant:74].active=YES;
+    UILabel *title=[self label:@"触觉反馈" size:15 weight:UIFontWeightMedium];
+    title.translatesAutoresizingMaskIntoConstraints=NO;
+    [row addSubview:title];
+    // Percent sits opposite the title, sharing its baseline so the two sizes line up.
+    UILabel *pct=[self label:@"" size:12 weight:UIFontWeightMedium];
+    pct.tag=1113;
+    pct.textAlignment=NSTextAlignmentRight;
+    pct.textColor=FMThemeColor(FMColorSecondary);
+    pct.translatesAutoresizingMaskIntoConstraints=NO;
+    [pct setContentHuggingPriority:1000 forAxis:UILayoutConstraintAxisHorizontal];
+    [pct setContentCompressionResistancePriority:1000 forAxis:UILayoutConstraintAxisHorizontal];
+    [row addSubview:pct];
+    UISlider *slider=[UISlider new];
+    slider.minimumValue=0;slider.maximumValue=1;
+    slider.value=HapticStrength();slider.tag=113;
+    slider.continuous=YES; // The percent follows the thumb; only touch-up persists.
+    slider.tintColor=FMAccent();
+    slider.accessibilityLabel=@"触觉反馈强度";
+    slider.translatesAutoresizingMaskIntoConstraints=NO;
+    [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
+    // The release is what writes; dragging only updates the percent shown.
+    [slider addTarget:self action:@selector(hapticSliderReleased:)
+     forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+    [row addSubview:slider];
+    [NSLayoutConstraint activateConstraints:@[
+        [title.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:16],
+        [title.topAnchor constraintEqualToAnchor:row.topAnchor constant:12],
+        [pct.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-16],
+        [pct.firstBaselineAnchor constraintEqualToAnchor:title.firstBaselineAnchor],
+        [pct.leadingAnchor constraintGreaterThanOrEqualToAnchor:title.trailingAnchor constant:8],
+        [slider.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:16],
+        [slider.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-16],
+        [slider.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:8]
+    ]];
+    pct.text=FMHapticPercent(slider.value);
+    UIView *card=FMCreateGroupedCard(@[row],16);
+    if(card) [s addArrangedSubview:card];
+}
 - (void)settingSlider:(UIStackView*)s title:(NSString*)title key:(NSString*)key min:(float)min max:(float)max def:(float)def tag:(NSInteger)tag {
     UILabel *l=[self label:title size:14 weight:UIFontWeightMedium];
     [s addArrangedSubview:l];
     UISlider *slider=[UISlider new];slider.minimumValue=min;slider.maximumValue=max;
     slider.value=FloatPref(key,def);slider.tag=tag;
+    if(tag==112) slider.continuous=NO; // One persisted write on release, not each frame.
     slider.tintColor=FMAccent();
     [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
     [self addRow:slider height:28 to:s];
@@ -4970,7 +5163,7 @@ static UIView *FMRunningBreathingLight(CGFloat size) {
     [self section:@"基础交互" sub:nil in:s];
     [self settingSwitch:s title:@"最近打开的 App 置顶"
                  key:@"recentAppsFirst" defaultValue:NO tag:20];
-    [self settingSwitch:s title:@"触觉反馈" key:@"haptic" defaultValue:YES tag:1];
+    [self settingHapticSlider:s];
     [self settingSwitch:s title:@"切换前二次确认" key:@"confirm" defaultValue:YES tag:2];
     [self spacer:s size:10];
     [self diyPage:s];
@@ -5482,8 +5675,7 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
                  @"startY":@(finger.y),@"centerY":@(CGRectGetMidY(sourceRow.frame)),
                  @"original":@(original),@"index":@(original)} mutableCopy];
         objc_setAssociatedObject(gesture,@selector(sortDrag:),state,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if(BoolPref(@"haptic",YES))
-            [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+        FMHaptic(UIImpactFeedbackStyleLight,.40);
         FMLog(@"menu-reorder-start",FMAppKey(app));
     } else if(gesture.state==UIGestureRecognizerStateChanged && state) {
         UIView *lifted=state[@"lifted"];
@@ -5505,8 +5697,7 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
                 animations:^{ [group layoutIfNeeded]; }
                 completion:nil];
             // A subtle tick signals the slot has moved, not every frame.
-            if(BoolPref(@"haptic",YES))
-                [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
+            FMHaptic(UIImpactFeedbackStyleLight,.22);
         }
     } else if(gesture.state==UIGestureRecognizerStateEnded ||
               gesture.state==UIGestureRecognizerStateCancelled ||
@@ -5721,7 +5912,17 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
 }
 
 - (void)compatibilityPage:(UIStackView *)stack {
-    [self section:@"应用兼容性" sub:@"开启后以兼容性方式启动，由 App 自行避让顶部。关闭时保持默认行为。部分 App 需重新启动后生效。" in:stack];
+    [self section:@"应用兼容性" sub:@"默认：完整窗口由 App 自行避让；UIKit：实验性同步宿主安全区，不压缩 App 画面；物理：将窗口避开顶部，可能压缩部分内容。部分 App 需关闭任务后重启。" in:stack];
+    [self spacer:stack size:10];
+    [self section:@"Guest UIKit 诊断" sub:@"仅用于排查多任务 App 的真实安全区。开启后重启目标 App；需要目标 App 已加载共享微珠 dylib。只记录窗口、控件类型和几何信息，不记录页面文字。" in:stack];
+    UISegmentedControl *guestDiag=[[UISegmentedControl alloc] initWithItems:@[@"关闭",@"记录"]];
+    guestDiag.selectedSegmentIndex=[LCOrbitGuestUIKitDiagnostics isEnabled]?1:0;
+    guestDiag.accessibilityLabel=@"LiveProcess UIKit 布局诊断";
+    [guestDiag addTarget:self action:@selector(guestUIKitDiagnosticsChanged:)
+            forControlEvents:UIControlEventValueChanged];
+    [self addRow:guestDiag height:40 to:stack];
+    [self spacer:stack size:14];
+
     // Settings is a one-off screen, not the drawer's hot path; keep the
     // uncached scan so the switches never render a stale inventory.
     NSArray<NSDictionary *> *apps=InstalledApps();
@@ -5740,16 +5941,15 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
         name.numberOfLines=1;
         name.lineBreakMode=NSLineBreakByTruncatingTail;
         [row addSubview:name];
-        UISwitch *control=[UISwitch new];
-        control.translatesAutoresizingMaskIntoConstraints=NO;
-        control.onTintColor=FMSwitchGreen();
-        control.on=[LCOrbitMultitask usesAppTopInsetForBundle:bundle];
-        control.enabled=bundle.length>0;
-        control.accessibilityLabel=[title stringByAppendingString:@"，兼容性方式启动"];
-        [control setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-        objc_setAssociatedObject(control,@selector(guestTopInsetChanged:),bundle,OBJC_ASSOCIATION_COPY_NONATOMIC);
-        [control addTarget:self action:@selector(guestTopInsetChanged:) forControlEvents:UIControlEventValueChanged];
-        [row addSubview:control];
+        UISegmentedControl *mode=[[UISegmentedControl alloc] initWithItems:@[@"默认",@"UIKit",@"物理"]];
+        mode.translatesAutoresizingMaskIntoConstraints=NO;
+        mode.selectedSegmentIndex=[LCOrbitMultitask topInsetModeForBundle:bundle];
+        mode.enabled=bundle.length>0;
+        mode.accessibilityLabel=[title stringByAppendingString:@"，顶部安全区模式"];
+        [mode setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        objc_setAssociatedObject(mode,@selector(guestTopInsetModeChanged:),bundle,OBJC_ASSOCIATION_COPY_NONATOMIC);
+        [mode addTarget:self action:@selector(guestTopInsetModeChanged:) forControlEvents:UIControlEventValueChanged];
+        [row addSubview:mode];
         [NSLayoutConstraint activateConstraints:@[
             [row.heightAnchor constraintEqualToConstant:68],
             [icon.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:15],
@@ -5758,9 +5958,10 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
             [icon.heightAnchor constraintEqualToConstant:42],
             [name.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:11],
             [name.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [name.trailingAnchor constraintLessThanOrEqualToAnchor:control.leadingAnchor constant:-10],
-            [control.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-15],
-            [control.centerYAnchor constraintEqualToAnchor:row.centerYAnchor]
+            [name.trailingAnchor constraintLessThanOrEqualToAnchor:mode.leadingAnchor constant:-8],
+            [mode.widthAnchor constraintEqualToConstant:174],
+            [mode.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12],
+            [mode.centerYAnchor constraintEqualToAnchor:row.centerYAnchor]
         ]];
         [rows addObject:row];
     }
@@ -5768,9 +5969,13 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
     if(card) [stack addArrangedSubview:card];
     if(!apps.count) [self note:@"暂无已安装的应用" in:stack];
 }
-- (void)guestTopInsetChanged:(UISwitch *)control {
-    NSString *bundle=objc_getAssociatedObject(control,@selector(guestTopInsetChanged:));
-    if(bundle.length) [LCOrbitMultitask setUsesAppTopInset:control.isOn forBundle:bundle];
+- (void)guestUIKitDiagnosticsChanged:(UISegmentedControl *)control {
+    [LCOrbitGuestUIKitDiagnostics setEnabled:control.selectedSegmentIndex==1];
+    control.selectedSegmentIndex=[LCOrbitGuestUIKitDiagnostics isEnabled]?1:0;
+}
+- (void)guestTopInsetModeChanged:(UISegmentedControl *)control {
+    NSString *bundle=objc_getAssociatedObject(control,@selector(guestTopInsetModeChanged:));
+    if(bundle.length) [LCOrbitMultitask setTopInsetMode:control.selectedSegmentIndex forBundle:bundle];
 }
 
 - (void)perAppPage:(UIStackView*)s {
@@ -5795,12 +6000,23 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
 }
 - (void)multitaskModeChanged:(UISegmentedControl *)control {
     NSError *error=nil;
-    BOOL bead=control.selectedSegmentIndex==1;
-    if(![LCOrbitMultitask setUseSystemMenu:!bead error:&error]) {
-        control.selectedSegmentIndex=[LCOrbitMultitask usesSystemMenu]?0:1;
+    BOOL saved=control.selectedSegmentIndex==2?[LCOrbitMultitask setUseAdaptiveSwitcher:YES error:&error]:
+        [LCOrbitMultitask setUseSystemMenu:control.selectedSegmentIndex==0 error:&error];
+    if(!saved) {
+        control.selectedSegmentIndex=[LCOrbitMultitask usesAdaptiveSwitcher]?2:([LCOrbitMultitask usesSystemMenu]?0:1);
         [self showMessage:@"无法切换多任务菜单" details:error.localizedDescription?:@"当前 LC 不支持此功能。"];
     } else {
-        FMLog(@"multitask-mode",bead?@"bead-fullscreen":@"lc-system");
+        FMLog(@"multitask-mode",control.selectedSegmentIndex==2?@"adaptive":(control.selectedSegmentIndex==1?@"bead-fullscreen":@"lc-system"));
+        [self refreshUI];
+    }
+}
+- (void)multitaskPresentationChanged:(UISegmentedControl *)control {
+    NSError *error=nil;NSInteger presentation=control.selectedSegmentIndex==1?1:0;
+    if(![LCOrbitMultitask setTaskSwitcherPresentation:presentation error:&error]) {
+        control.selectedSegmentIndex=[LCOrbitMultitask taskSwitcherPresentation];
+        [self showMessage:@"无法切换任务呈现方式" details:error.localizedDescription?:@"当前 LC 宿主暂不支持此模式。"];
+    } else {
+        FMLog(@"multitask-presentation",presentation==1?@"ipad":@"iphone");
         [self refreshUI];
     }
 }
@@ -5824,6 +6040,7 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
         case 23:key=@"keepScreenAwake";break;
         case 25:key=@"autoCheckUpdate";break;
         case 26:key=@"autoLaunchLastApp";break;
+        case 27:key=@"adaptiveActivePreviewOnly";break;
         case 4:key=AppPref();break;
         default:return;
     }
@@ -5845,6 +6062,9 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
     if(sw.tag==26) {
         FMLog(@"auto-launch-last-app",sw.isOn?@"on":@"off");
     }
+    if(sw.tag==27) {
+        FMLog(@"adaptive-active-preview-only",sw.isOn?@"on":@"off");
+    }
     if(sw.tag==23) {
         [self syncScreenAwakeState];
         FMLog(@"keep-screen-awake",sw.isOn?@"on":@"off");
@@ -5857,6 +6077,19 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
 }
 // The per-app bead opacity slider.
 - (void)sliderChanged:(UISlider*)slider {
+    if(slider.tag==113) {
+        // Follow the thumb so the percent tracks it, but leave the write to release.
+        CGFloat strength=round(Clamp(slider.value,0,1)*20)/20; // 5% steps keep the middle a real midpoint
+        ((UILabel *)[slider.superview viewWithTag:1113]).text=FMHapticPercent(strength);
+        return;
+    }
+    if(slider.tag==112) {
+        CGFloat bottomGap=round(Clamp(slider.value,0,80));
+        slider.value=bottomGap;
+        SetPref(@"adaptiveDockBottomGap",@(bottomGap));
+        FMLog(@"adaptive-dock-position",[NSString stringWithFormat:@"bottom-gap=%.0f",bottomGap]);
+        return;
+    }
     if(slider.tag!=12) return;
     SetPref([@"appAlpha." stringByAppendingString:GuestID()],@(slider.value));
     [self refreshOrbPreview];
@@ -5864,6 +6097,17 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
         FloatPref([@"appAlpha." stringByAppendingString:GuestID()],FloatPref(@"idleAlpha",.72)):
         FloatPref(@"idleAlpha",.72);
     self.orb.alpha=alpha;
+}
+// Settle the haptic strength slider: snap to the 5% grid, store it, preview it.
+- (void)hapticSliderReleased:(UISlider*)slider {
+    CGFloat strength=round(Clamp(slider.value,0,1)*20)/20;
+    slider.value=strength;
+    ((UILabel *)[slider.superview viewWithTag:1113]).text=FMHapticPercent(strength);
+    FMStagePreference(@"hapticStrength",@(strength));
+    // The boolean is what older builds read. Keep it in step with the slider.
+    SetPref(@"haptic",@(strength>0));
+    FMCommitStagedPreferences();
+    FMHaptic(UIImpactFeedbackStyleLight,.40);
 }
 - (void)openMenuLogs {
     if(!self.settingsNavigation) return;
@@ -5975,7 +6219,10 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
 }
 - (void)performResetAllSettings {
     [self resetDockSettings];
-    SetPref(@"showRestart",@YES);SetPref(@"haptic",@YES);
+    SetPref(@"showRestart",@YES);
+    SetPref(@"haptic",@YES);
+    FMStagePreference(@"hapticStrength",@(.5));
+    FMCommitStagedPreferences();
     SetPref(@"recentAppsFirst",@NO);
     SetPref(@"appearanceMode",@(0));
     for(NSString *key in @[@"accentLight",@"accentDark",@"theme",@"preferDarkIcons",@"orbWidth",@"easterEggIOSTheme"]) {
@@ -5993,12 +6240,16 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
     self.launchPending=NO;
 }
 - (void)launchApp:(NSDictionary *)app {
+    NSUUID *dockToken=[LCOrbitTaskSwitcher dockLaunchTokenForApp:app];
     UIWindowScene *scene=self.settingsWindow.windowScene?:self.window.windowScene;
     LCOrbitContext *context=self.orbitContext;
     if(self.launchPending || !context || !scene ||
        ![[LCOrbitCore sharedCore] isModuleEnabled:@"FloatingMenu"] ||
        scene.activationState!=UISceneActivationStateForegroundActive ||
-       UIApplication.sharedApplication.applicationState!=UIApplicationStateActive) return;
+       UIApplication.sharedApplication.applicationState!=UIApplicationStateActive) {
+        [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
+        return;
+    }
     // Reserve before sharing (and before publishing events that may reenter).
     // A mode change must cancel this request rather than choose a new backend.
     NSUInteger generation=++self.launchGeneration;
@@ -6017,7 +6268,10 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
     __weak typeof(self) weakSelf=self;
     FMSyncSharedTweaks(^{
         typeof(self) manager=weakSelf;
-        if(!manager || manager.launchGeneration!=generation || !manager.launchPending) return;
+        if(!manager || manager.launchGeneration!=generation || !manager.launchPending) {
+            [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
+            return;
+        }
         UIWindowScene *currentScene=manager.settingsWindow.windowScene?:manager.window.windowScene;
         if(manager.orbitContext!=context || currentScene!=scene ||
            scene.activationState!=UISceneActivationStateForegroundActive ||
@@ -6026,14 +6280,20 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
            [LCOrbitMultitask isEnabled]!=multitask || [LCOrbitMultitask usesSystemMenu]!=systemMenu ||
            FMHostUI()!=hostUI || ![(GuestID()?:@"") isEqualToString:guestID]) {
             [manager invalidatePendingLaunch];
+            [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
             FMLog(@"switch-cancelled",@"launch-context-changed");
             return;
         }
         NSError *error=nil;
+        [LCOrbitTaskSwitcher beginDockLaunch:dockToken];
         BOOL accepted=[LCOrbitGuestService launchGuest:target error:&error];
-        if(manager.launchGeneration!=generation) return;
+        if(manager.launchGeneration!=generation) {
+            [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
+            return;
+        }
         manager.launchPending=NO;
         if(!accepted) {
+            [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
             FMLog(@"switch-rejected",error.localizedDescription);
             [manager showMessage:@"暂不可切换" details:error.localizedDescription];
             return;
@@ -6044,18 +6304,22 @@ static UIImage *FMCreateWinterSnowImage(FMSnowflakeStyle style) {
     });
 }
 - (void)showMultitaskMenuExpanded:(BOOL)expanded {
+    FMBeginPreferenceSnapshot();
+    @try {
     if(![LCOrbitMultitask isEnabled]) return;
     [self installIfPossible];
     if(!self.window || self.settingsWindow) return;
     if([LCOrbitMultitask usesSystemMenu]) { [self draw];return; }
     self.apps=InstalledAppsCached();self.page=@"apps";
     [self rememberCurrentApp];
+    if(expanded && [self usesAdaptiveDrawer]) { [self presentAdaptiveDrawer];return; }
     if(expanded && !self.isOpen) {
         [self loadAppsScroll];
         self.isOpen=YES;
     }
     if(self.isOpen && self.appsScroll && self.panel) [self requestAppsRefresh];
     else [self draw];
+    } @finally { FMEndPreferenceSnapshot(); }
 }
 - (void)launchPath:(NSString *)path uuid:(NSString *)uuid {
     [self persistAppsScroll];
@@ -6148,6 +6412,9 @@ static BOOL sHasAttemptedAutoLaunch=NO;
     }
 }
 - (void)confirmTitle:(NSString*)title action:(void(^)(void))action {
+    [self confirmTitle:title action:action cancellation:nil];
+}
+- (void)confirmTitle:(NSString *)title action:(void (^)(void))action cancellation:(void (^)(void))cancel {
     BOOL independent=BoolPref([@"override." stringByAppendingString:GuestID()],NO);
     BOOL confirm=independent?BoolPref(AppPref(),BoolPref(@"confirm",YES)):BoolPref(@"confirm",YES);
     if(!confirm) {action();return;}
@@ -6155,10 +6422,12 @@ static BOOL sHasAttemptedAutoLaunch=NO;
         message:([LCOrbitMultitask isEnabled] && ![title containsString:@"SideStore"])?
             @"将打开或切回目标任务，其他任务继续保留。":@"经典单任务切换会结束当前 App 的内存状态；请先保存进度。"
         preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){if(cancel)cancel();}]];
     [alert addAction:[UIAlertAction actionWithTitle:@"继续" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){action();}]];
-    if(!self.window.rootViewController.presentedViewController)
-        [self.window.rootViewController presentViewController:alert animated:YES completion:nil];
+    UIViewController *presenter=self.window.rootViewController;
+    if(presenter&&!presenter.presentedViewController)
+        [presenter presentViewController:alert animated:YES completion:nil];
+    else if(cancel)cancel();
 }
 - (void)openBuiltinSideStore {
     [self persistAppsScroll];
@@ -6190,6 +6459,59 @@ static BOOL sHasAttemptedAutoLaunch=NO;
         return;
     }
     [self launchPath:@"ui" uuid:nil];
+}
+- (BOOL)usesAdaptiveDrawer {
+    return [LCOrbitMultitask isEnabled] && [LCOrbitMultitask usesAdaptiveSwitcher] && ![LCOrbitMultitask usesNativeTaskWindows];
+}
+- (BOOL)presentAdaptiveDrawer {
+    if(![self usesAdaptiveDrawer] || self.settingsWindow || !self.window) return NO;
+    UIWindowScene *scene=self.window.windowScene ?: [LCOrbitHost activeScene];
+    [self persistAppsScroll];
+    self.page=@"apps";self.isOpen=NO;
+    [self removePanel];[self drawOrb];
+    [self rememberCurrentApp];
+    NSArray *apps=[self orderedAppsForMenu];
+    BOOL compact=BoolPref(@"compactMode",NO);
+    // Adaptive Dock is a different surface from the legacy drawer. Its icon
+    // size follows the dedicated slider, regardless of compact/list mode.
+    CGFloat iconSize=FMMenuStyleValue(@"adaptiveDockIconSize");
+    UIColor *iconFrameColor=compact&&BoolPref(@"iconFrame",NO)?
+        [FMThemeColor(FMColorRow) colorWithAlphaComponent:FMClearGlassEnabled()?.64:.74]:nil;
+    __weak typeof(self) weakSelf=self;
+    NSError *error=nil;
+    BOOL presented=[LCOrbitTaskSwitcher presentInScene:scene apps:apps dockIconSize:iconSize iconProvider:^UIView *(NSDictionary *app,CGFloat size,BOOL current) {
+        UIView *tile=[[UIView alloc] initWithFrame:CGRectMake(0,0,size,size)];
+        UIView *icon=tile;
+        if(iconFrameColor) {
+            tile.backgroundColor=iconFrameColor;
+            tile.layer.cornerRadius=size*.26;
+            tile.layer.cornerCurve=kCACornerCurveContinuous;
+            icon=[[UIView alloc] initWithFrame:CGRectInset(tile.bounds,3,3)];
+            [tile addSubview:icon];
+        }
+        FMDrawAppIcon(icon,app,CGRectGetWidth(icon.bounds),current);
+        if([app[@"shared"] boolValue]) {
+            CGFloat side=MIN(14,floor(CGRectGetWidth(icon.bounds)*.42));
+            UIImageSymbolConfiguration *configuration=[UIImageSymbolConfiguration configurationWithPointSize:side*.52 weight:UIImageSymbolWeightBold];
+            UIImageView *badge=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"arrowshape.turn.up.left.fill" withConfiguration:configuration]];
+            badge.frame=CGRectMake(0,0,side,side);
+            badge.layer.cornerRadius=side/2;
+            badge.backgroundColor=[UIColor colorNamed:@"BadgeColor"]?:UIColor.systemOrangeColor;
+            badge.tintColor=UIColor.whiteColor;
+            badge.contentMode=UIViewContentModeCenter;
+            [icon addSubview:badge];
+        }
+        tile.accessibilityValue=FMAppStatus(app,current);
+        return tile;
+    } launchHandler:^(NSDictionary *app){
+        [weakSelf switchToApp:app];
+    } error:&error];
+    if(!presented) {
+        [self showMessage:@"无法打开任务切换" details:error.localizedDescription?:@"请稍后重试。"];
+        return NO;
+    }
+    [self refreshInventoryInBackground];
+    return YES;
 }
 - (void)goHome {
     SetPref(@"lastActiveAppKey",@"ui");
@@ -6240,6 +6562,17 @@ static BOOL sHasAttemptedAutoLaunch=NO;
     [self draw];
 }
 - (void)closeMultitaskGuest {
+    if([LCOrbitMultitask usesNativeTaskWindows]) {
+        NSString *sceneIdentifier=self.window.windowScene.session.persistentIdentifier;
+        for(NSDictionary *task in [LCOrbitMultitask runningTasks]) {
+            if(!sceneIdentifier || ![task[@"sceneIdentifier"] isEqual:sceneIdentifier]) continue;
+            NSError *error=nil;
+            if([LCOrbitMultitask closeTask:task error:&error]) {self.isOpen=NO;[self draw];}
+            else [self showMessage:@"关闭任务失败" details:error.localizedDescription];
+            return;
+        }
+        [self showMessage:@"没有当前任务" details:@"当前窗口没有正在运行的 App。"];return;
+    }
     for(NSDictionary *app in self.apps)
         if([LCOrbitMultitask isCurrentGuest:app]) {
             [self closeApp:app sender:nil collapse:YES];return;
@@ -6260,8 +6593,17 @@ static BOOL sHasAttemptedAutoLaunch=NO;
 }
 - (void)switchFromRow:(UIControl *)sender {
     NSDictionary *app=objc_getAssociatedObject(sender,@selector(switchFromRow:));
-    if(!app || [LCOrbitGuestService isCurrentGuest:app]) return;
+    [self switchToApp:app];
+}
+- (void)switchToApp:(NSDictionary *)app {
+    if(!app)return;
+    NSUUID *dockToken=[LCOrbitTaskSwitcher dockLaunchTokenForApp:app];
+    if([LCOrbitGuestService isCurrentGuest:app]) {
+        [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
+        return;
+    }
     if(![app[@"builtin"] boolValue] && ![app[@"launchable"] boolValue]) {
+        [LCOrbitTaskSwitcher cancelDockLaunch:dockToken];
         NSString *detail=app[@"status"] ?: @"请从 LC 启动。";
         if([app[@"hidden"] boolValue]) {
             detail=@"App 已隐藏无法开启，请解除隐藏状态或去 LiveContainer 验证启用";
@@ -6279,7 +6621,7 @@ static BOOL sHasAttemptedAutoLaunch=NO;
     }
     [self confirmTitle:[NSString stringWithFormat:@"切换到 %@？",app[@"title"]] action:^{
         [self launchApp:app];
-    }];
+    } cancellation:^{[LCOrbitTaskSwitcher cancelDockLaunch:dockToken];}];
 }
 @end
 
@@ -6369,10 +6711,12 @@ static BOOL sHasAttemptedAutoLaunch=NO;
     BOOL newState=!current;
     SetPref(@"easterEggIOSTheme", @(newState));
     
-    if(@available(iOS 10.0, *)) {
-        UINotificationFeedbackGenerator *feedback=[UINotificationFeedbackGenerator new];
-        [feedback prepare];
-        [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
+    if(HapticStrength()>0) {
+        if(@available(iOS 10.0, *)) {
+            UINotificationFeedbackGenerator *feedback=[UINotificationFeedbackGenerator new];
+            [feedback prepare];
+            [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
+        }
     }
     
     [[FMManager shared] refreshUI];
@@ -6546,6 +6890,54 @@ static BOOL sHasAttemptedAutoLaunch=NO;
         } else [prompt dismissViewControllerAnimated:YES completion:completion];
     } else completion();
 }
+// This is reached ONLY from the signed-and-verified update success callback.
+// Keep a short, cancellable window for reading the success message before
+// using LC's normal process relaunch path. The new dylib loads on cold start.
+- (void)offerRestartAfterVerifiedUpdate {
+    if(!FMHostUI() || ![self isSettingsRootVisible] || self.presentedViewController) {
+        [self presentUpdateResult:@"更新已完成"
+            message:@"插件已安装并签名。请退出并重新打开 LC 以加载新版本；运行中的 Guest 也需重启。"
+            showRepository:NO];
+        return;
+    }
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"更新成功"
+        message:@"插件已安装并自动签名，约 3 秒后将自动重启 LC。\n运行中的 Guest 需要重新打开才能加载新版插件。"
+        preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf=self;
+    __weak UIAlertController *weakAlert=alert;
+    __block BOOL completed=NO;
+    void (^restartNow)(void)=^{
+        typeof(self) owner=weakSelf;
+        if(!owner || !FMHostUI()) return;
+        NSError *restartError=nil;
+        if(![LCOrbitPluginUpdater restartHostAfterSignedUpdate:&restartError]) {
+            [owner presentUpdateResult:@"请手动重启 LC"
+                message:restartError.localizedDescription?:@"自动重启未能启动。插件已签名，请手动关闭并重新打开 LC。"
+                showRepository:NO];
+        }
+    };
+    [alert addAction:[UIAlertAction actionWithTitle:@"稍后重启"
+        style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+            completed=YES;
+        }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"立即重启"
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            if(completed) return;
+            completed=YES;
+            [weakSelf afterUpdatePrompt:weakAlert perform:restartNow];
+        }]];
+    [self presentViewController:alert animated:YES completion:^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            typeof(self) owner=weakSelf;
+            if(completed || !owner || !FMHostUI() ||
+               UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+               owner.presentedViewController!=weakAlert) return;
+            completed=YES;
+            [owner afterUpdatePrompt:weakAlert perform:restartNow];
+        });
+    }];
+}
 - (void)downloadUpdateRelease:(NSDictionary *)candidate prompt:(UIAlertController *)prompt {
     if(self.checkingUpdate || !FMHostUI() || ![self isSettingsRootVisible]) return;
     NSDictionary *release=[LCOrbitUpdateRelease validatedRelease:candidate error:nil];
@@ -6576,27 +6968,29 @@ static BOOL sHasAttemptedAutoLaunch=NO;
             } completion:^(NSData *binary,NSHTTPURLResponse *response,NSError *error) {
                 dispatch_async(dispatch_get_main_queue(),^{
                     if(!error && weakSelf.updateDownloadAlert==progressAlert) {
-                        progressAlert.message=@"下载完成，正在校验并安装…";
+                        progressAlert.message=@"下载完成，正在校验并自动签名…";
                         weakSelf.updateStatusLabel.text=progressAlert.message;
                     }
                 });
-                NSError *installError=nil;
-                BOOL success=NO;
+                void (^finished)(BOOL,NSError *)=^(BOOL success,NSError *installError) {
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        typeof(self) current=weakSelf;
+                        if(!current) return;
+                        current.checkingUpdate=NO;
+                        current.updateStatusLabel.text=@"检查微珠最新发布版";
+                        [current afterUpdatePrompt:progressAlert perform:^{
+                            weakSelf.updateDownloadAlert=nil;
+                            if(success) [weakSelf offerRestartAfterVerifiedUpdate];
+                            else [weakSelf presentUpdateResult:@"更新未完成"
+                                message:installError.localizedDescription?:error.localizedDescription?:@"下载或签名失败，请检查证书和插件目录。"
+                                showRepository:YES];
+                        }];
+                    });
+                };
                 if(!error && response.statusCode==200 && binary.length>0 && FMHostUI())
-                    success=[LCOrbitPluginUpdater installDownloadedPlugin:binary expectedSHA256:release[@"sha256"] error:&installError];
-                dispatch_async(dispatch_get_main_queue(),^{
-                    typeof(self) current=weakSelf;
-                    if(!current) return;
-                    current.checkingUpdate=NO;
-                    current.updateStatusLabel.text=@"检查微珠最新发布版";
-                    [current afterUpdatePrompt:progressAlert perform:^{
-                        weakSelf.updateDownloadAlert=nil;
-                        [weakSelf presentUpdateResult:success?@"插件已下载并替换":@"更新未完成"
-                            message:success?@"已校验并替换旧插件。请前往 LC 原生 Tweaks 页面重新签名插件，然后重启 LC 和相关 Guest。共享及专属插件需单独更新。":
-                            (installError.localizedDescription?:error.localizedDescription?:@"下载或替换失败，请检查网络与插件目录。")
-                            showRepository:!success];
-                    }];
-                });
+                    [LCOrbitPluginUpdater installDownloadedPluginAndSign:binary expectedSHA256:release[@"sha256"] completion:finished];
+                else finished(NO,error?:[NSError errorWithDomain:@"LCOrbit.PluginUpdate" code:19
+                    userInfo:@{NSLocalizedDescriptionKey:@"下载无效或当前不在 LC 主界面，未替换插件。"}]);
             }];
     }];
 }
@@ -6609,7 +7003,7 @@ static BOOL sHasAttemptedAutoLaunch=NO;
         if([self.automaticallyOfferedVersions containsObject:version]) return;
         [self.automaticallyOfferedVersions addObject:version];
     }
-    NSString *message=[NSString stringWithFormat:@"%@\n\n下载后将校验新插件并原子替换旧版本。校验或替换失败时保留旧插件。安装完成后，请在 LC 原生 Tweaks 页面重新签名并重启相关应用。",release[@"notes"]];
+    NSString *message=[NSString stringWithFormat:@"%@\n\n下载后将校验、替换并自动签名微珠插件；若签名失败则恢复旧插件。签名成功后会提示并在约 3 秒后自动重启 LC，可选择稍后重启。",release[@"notes"]];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"发现微珠新版本 v%@",version]
         message:message preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf=self;
@@ -7090,7 +7484,7 @@ typedef NS_ENUM(NSInteger, FMDockGroup) {
 };
 // When a row shows inside its open group.
 typedef NS_ENUM(NSInteger, FMDockWhen) {
-    FMDockWhenAlways,FMDockWhenCapsule,FMDockWhenDroplet,FMDockWhenFade,FMDockWhenCompact,FMDockWhenList
+    FMDockWhenAlways,FMDockWhenCapsule,FMDockWhenDroplet,FMDockWhenFade,FMDockWhenCompact,FMDockWhenList,FMDockWhenAdaptive
 };
 
 @interface FMDockSlider : UISlider
@@ -7240,7 +7634,7 @@ static UIView *FMDockCard(UIStackView *rows) {
     NSUInteger _slideGeneration;
     CGFloat _pw,_ph,_actual,_fit,_closedHeight,_openHeight,_beadW,_beadH,_shadow,_builtWidth,_listTop,_headroom;
     CGFloat _idleAlpha,_fadedAlpha;
-    CGFloat _progress,_velocity,_omega,_zeta;
+    CGFloat _progress,_velocity,_omega,_zeta,_outlineProgress;
     CFTimeInterval _tick,_elapsed,_builtAt;
     CADisplayLink *_link;
     NSTimer *_fadeTimer;
@@ -7550,6 +7944,7 @@ static UIView *FMDockCard(UIStackView *rows) {
     _bead=[manager orbPreviewWithFrame:CGRectMake(0,0,_beadW,_beadH) left:_left];
     [_scene addSubview:_bead];
     CGFloat shift=0;
+    _outlineProgress=-1;
     _placed=FMPlaceHandles(FMOrbHandleMetrics(YES),FMOrbHandleMetrics(NO),FMOrbHandleIsCapsule(),1/_actual,_pw,_ph,
                            _ph*.5,&_beadParams,&_dropletParams,&shift);
     _drawerParams=FMDrawerNotchParams(_pw,_ph,_compact);
@@ -7585,17 +7980,16 @@ static UIView *FMDockCard(UIStackView *rows) {
     [self syncHeight];
     if(!_glass) return;
     CGFloat raw=MAX(progress,0),t=MIN(raw,1);
-    __attribute__((objc_precise_lifetime)) UIBezierPath *outline=_placed?
-        FMDrawerMorphPath(_glass.bounds,_beadParams,_dropletParams,_drawerParams,_left,_compact,t):
-        FMSideNotchPath(_glass.bounds,_left,_compact,NO);
-    CAShapeLayer *clip=(CAShapeLayer *)_glass.layer.mask;
+    CGFloat outlineProgress=_placed?t:0;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    if([clip isKindOfClass:CAShapeLayer.class]) clip.path=outline.CGPath;
-    for(CALayer *layer in _glass.layer.sublayers)
-        if([layer.name isEqualToString:@"fm.panel.rim"] && [layer isKindOfClass:CAShapeLayer.class])
-            ((CAShapeLayer *)layer).path=outline.CGPath;
-    _drawer.layer.shadowPath=outline.CGPath;
+    if(_outlineProgress!=outlineProgress) {
+        UIBezierPath *outline=_placed?
+            FMDrawerMorphPath(_glass.bounds,_beadParams,_dropletParams,_drawerParams,_left,_compact,t):
+            FMSideNotchPath(_glass.bounds,_left,_compact,NO);
+        FMSetDrawerOutline(_glass,_drawer.layer,outline);
+        _outlineProgress=outlineProgress;
+    }
     _drawer.layer.shadowOpacity=_shadow*FMSmooth(t/.5);
     [CATransaction commit];
     BOOL reveal=_revealed?t>=.42:t>=.5,flipped=reveal!=_revealed,still=UIAccessibilityIsReduceMotionEnabled();
@@ -7829,6 +8223,10 @@ static UIView *FMDockCard(UIStackView *rows) {
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    // A slider can still have its last value staged when the settings page
+    // closes. Commit it now so the next adaptive Dock reads the chosen size.
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(commitStagedSlider) object:nil];
+    [self commitStagedSlider];
     FMManager *manager=[FMManager shared];
     if(manager.dimensionsPreview!=self.preview) return;
     manager.dimensionsPreview=nil;
@@ -8085,6 +8483,7 @@ static UIView *FMDockCard(UIStackView *rows) {
     // The two layouts each keep their own icon size; only the one in use shows.
     [self addSlider:FMDockOption(@"menuCompactIconSize",@"图标大小") to:rows group:group when:FMDockWhenCompact];
     [self addSlider:FMDockOption(@"menuListIconSize",@"图标大小") to:rows group:group when:FMDockWhenList];
+    [self addSlider:FMDockOption(@"adaptiveDockIconSize",@"Dock 图标大小") to:rows group:group when:FMDockWhenAdaptive];
     [self add:[self segmentRow:@"弹出动画" items:@[@"逐个",@"一起",@"关"] key:@"popAnimation" selected:FMPopMode()]
            to:rows group:group when:FMDockWhenAlways];
     if(@available(iOS 26.0,*)) {
@@ -8133,8 +8532,9 @@ static UIView *FMDockCard(UIStackView *rows) {
         case FMDockWhenCapsule: return FMOrbHandleIsCapsule();
         case FMDockWhenDroplet: return !FMOrbHandleIsCapsule();
         case FMDockWhenFade: return BoolPref(@"idleFade",YES);
-        case FMDockWhenCompact: return BoolPref(@"compactMode",NO);
-        case FMDockWhenList: return !BoolPref(@"compactMode",NO);
+        case FMDockWhenCompact: return ![LCOrbitMultitask usesAdaptiveSwitcher] && BoolPref(@"compactMode",NO);
+        case FMDockWhenList: return ![LCOrbitMultitask usesAdaptiveSwitcher] && !BoolPref(@"compactMode",NO);
+        case FMDockWhenAdaptive: return [LCOrbitMultitask usesAdaptiveSwitcher];
         default: return YES;
     }
 }

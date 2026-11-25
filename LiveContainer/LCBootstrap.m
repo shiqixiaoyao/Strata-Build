@@ -983,12 +983,16 @@ int LiveContainerMain(int argc, char *argv[]) {
         sideStoreExist = [NSFileManager.defaultManager fileExistsAtPath:[lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/SideStoreApp.framework"]];
     }
 
-    if([lcUserDefaults boolForKey:@"LCOpenSideStore"] || [selectedApp isEqualToString:@"builtinSideStore"]) {
-        if(sideStoreExist) {
-            isSideStore = true;
-        } else {
-            [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
-        }
+    // LCOpenSideStore 是遗留的粘性开关：老的浮动菜单可能把它永久打开，
+    // 结果宿主每次启动都直奔 SideStore。按「一次性请求」处理——本次生效，
+    // 立刻清掉，启动目标由 selected=builtinSideStore 与一次性请求共同决定。
+    BOOL legacySideStoreRequest = [lcUserDefaults boolForKey:@"LCOpenSideStore"];
+    if (legacySideStoreRequest) {
+        [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
+        NSLog(@"[LCBootstrap] Consumed one-shot LCOpenSideStore request");
+    }
+    if(sideStoreExist && (legacySideStoreRequest || [selectedApp isEqualToString:@"builtinSideStore"])) {
+        isSideStore = true;
     }
     
     if(selectedApp && !isSideStore && !selectedContainer) {
@@ -1101,10 +1105,16 @@ int LiveContainerMain(int argc, char *argv[]) {
     // 3.9.7 曾经为了让微珠在 LC 自己界面上也出现，替用户写了 LCLoadTweaksToSelf=YES，
     // 把 TweakLoader 硬拉进宿主——而 Orbit 的宿主分支是 4.0 宿主才配得上的，结果是
     // 点开就闪退。这里做一次性回收，之后宿主回到原生行为（用户自己开开关才加载）。
-    if ([lcUserDefaults objectForKey:@"LCBuiltInFloatingMenuEnabled"] &&
-        [lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"]) {
-        [lcUserDefaults setBool:NO forKey:@"LCLoadTweaksToSelf"];
-        StrataPluginLog(@"reset LCLoadTweaksToSelf -> NO（撤销 3.9.7 的宿主注入）");
+    // 3.9.7 为了让微珠在 LC 自己界面上也出现，替用户写过 LCLoadTweaksToSelf=YES，
+    // 于是宿主启动就 dlopen TweakLoader —— 里面那套 Orbit 的宿主分支在 3.9 宿主上
+    // 会启动即崩。3.9.8 起不再写这个键；这里只做一次性清理，之后尊重用户自己的选择
+    // （LC 的开发者选项里本来就有这个开关）。
+    if (![lcUserDefaults boolForKey:@"LCStrataHostTweakMigration"]) {
+        [lcUserDefaults setBool:YES forKey:@"LCStrataHostTweakMigration"];
+        if ([lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"]) {
+            [lcUserDefaults setBool:NO forKey:@"LCLoadTweaksToSelf"];
+            StrataPluginLog(@"migrated LCLoadTweaksToSelf -> NO（一次性，撤销旧版宿主注入）");
+        }
     }
     if ([lcUserDefaults boolForKey:@"LCLoadTweaksToSelf"]) {
         NSString *tweakFolder = nil;

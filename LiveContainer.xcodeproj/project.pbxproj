@@ -27,6 +27,9 @@
 		17AA00000000000000000024 /* LCOrbitTweakCenterViews.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000023 /* LCOrbitTweakCenterViews.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
 		17AA00000000000000000026 /* LCOrbitTweakSync.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000025 /* LCOrbitTweakSync.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
 		17AA00000000000000000028 /* LCOrbitUpdateRelease.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000027 /* LCOrbitUpdateRelease.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA0000000000000000003E /* LCOrbitGuestUIKitDiagnostics.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000003D /* LCOrbitGuestUIKitDiagnostics.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000040 /* LCOrbitMultitaskUI.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA0000000000000000003F /* LCOrbitMultitaskUI.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		17AA00000000000000000042 /* LCOrbitTaskSwitcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 17AA00000000000000000041 /* LCOrbitTaskSwitcher.m */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
 		A15000000000000000000010 /* StosSign_API in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000020 /* StosSign_API */; };
 		A15000000000000000000011 /* StosSign_Auth in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000021 /* StosSign_Auth */; };
 		A15000000000000000000012 /* StosSign_Anisette in Frameworks */ = {isa = PBXBuildFile; productRef = A15000000000000000000022 /* StosSign_Anisette */; };
@@ -218,6 +221,11 @@
 		17AA00000000000000000039 /* LCOrbitTweakCenterViews.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTweakCenterViews.h; sourceTree = "<group>"; };
 		17AA0000000000000000003A /* LCOrbitTweakSync.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTweakSync.h; sourceTree = "<group>"; };
 		17AA0000000000000000003B /* LCOrbitUpdateRelease.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitUpdateRelease.h; sourceTree = "<group>"; };
+		17AA0000000000000000003D /* LCOrbitGuestUIKitDiagnostics.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitGuestUIKitDiagnostics.m; sourceTree = "<group>"; };
+		17AA0000000000000000003F /* LCOrbitMultitaskUI.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitMultitaskUI.m; sourceTree = "<group>"; };
+		17AA00000000000000000041 /* LCOrbitTaskSwitcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LCOrbitTaskSwitcher.m; sourceTree = "<group>"; };
+		17AA00000000000000000043 /* LCOrbitGuestUIKitDiagnostics.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitGuestUIKitDiagnostics.h; sourceTree = "<group>"; };
+		17AA00000000000000000044 /* LCOrbitTaskSwitcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LCOrbitTaskSwitcher.h; sourceTree = "<group>"; };
 		172978E8302EAF07004A3E78 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		172CA8542D9D721700CF6989 /* dyld_bypass_validation.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = dyld_bypass_validation.m; sourceTree = "<group>"; };
 		172CA8552D9D721700CF6989 /* FoundationPrivate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FoundationPrivate.h; sourceTree = "<group>"; };
@@ -520,6 +528,11 @@
 				17AA00000000000000000039 /* LCOrbitTweakCenterViews.h */,
 				17AA0000000000000000003A /* LCOrbitTweakSync.h */,
 				17AA0000000000000000003B /* LCOrbitUpdateRelease.h */,
+				17AA0000000000000000003D /* LCOrbitGuestUIKitDiagnostics.m */,
+				17AA0000000000000000003F /* LCOrbitMultitaskUI.m */,
+				17AA00000000000000000041 /* LCOrbitTaskSwitcher.m */,
+				17AA00000000000000000043 /* LCOrbitGuestUIKitDiagnostics.h */,
+				17AA00000000000000000044 /* LCOrbitTaskSwitcher.h */,
 			);
 			path = Orbit;
 			sourceTree = "<group>";
@@ -1107,6 +1120,9 @@
 				17AA00000000000000000024 /* LCOrbitTweakCenterViews.m in Sources */,
 				17AA00000000000000000026 /* LCOrbitTweakSync.m in Sources */,
 				17AA00000000000000000028 /* LCOrbitUpdateRelease.m in Sources */,
+				17AA0000000000000000003E /* LCOrbitGuestUIKitDiagnostics.m in Sources */,
+				17AA00000000000000000040 /* LCOrbitMultitaskUI.m in Sources */,
+				17AA00000000000000000042 /* LCOrbitTaskSwitcher.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

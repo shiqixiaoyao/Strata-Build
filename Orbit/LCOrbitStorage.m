@@ -9,6 +9,20 @@
 static NSError *StorageError;
 static NSMutableDictionary<NSString *,NSDictionary *> *LastGood;
 static const NSUInteger MaximumConfigSize=1048576;
+static NSString *const ReadSnapshotsKey=@"LCOrbitStorage.readSnapshots";
+@interface LCOrbitReadSnapshot : NSObject
+@property(nonatomic,copy) NSString *root;
+@property(nonatomic,copy) NSDictionary *values;
+@end
+@implementation LCOrbitReadSnapshot @end
+static NSMutableArray<LCOrbitReadSnapshot *> *ReadSnapshots(void) {
+    return NSThread.currentThread.threadDictionary[ReadSnapshotsKey];
+}
+static BOOL SameRoot(NSString *a,NSString *b) { return a==b || [a isEqualToString:b]; }
+static void RefreshReadSnapshots(NSString *root,NSDictionary *values) {
+    for(LCOrbitReadSnapshot *snapshot in ReadSnapshots())
+        if(SameRoot(snapshot.root,root)) snapshot.values=values;
+}
 static BOOL PluginKey(id key) {
     return [key isKindOfClass:NSString.class] &&
         ![key isEqualToString:@"LCFloatingMenu.previousMultitaskMode"] &&
@@ -30,13 +44,17 @@ static BOOL JSONValue(id value) {
 static BOOL PreferenceValue(NSString *key,id value) {
     if(!JSONValue(value)) return NO;
     NSString *name=[key hasPrefix:@"LCFloatingMenu."]?[key substringFromIndex:15]:key;
+    if([name isEqual:@"taskSwitcherMode"])
+        return [value isKindOfClass:NSNumber.class] && [@[@0,@1,@2] containsObject:value];
+    if([name isEqual:@"taskSwitcherPresentation"])
+        return [value isKindOfClass:NSNumber.class] && [@[@0,@1] containsObject:value];
     if([@[@"favoritePaths",@"menuOrder",@"autoPiPApps"] containsObject:name]) {
         if(![value isKindOfClass:NSArray.class]) return NO;
         for(id item in value) if(![item isKindOfClass:NSString.class]) return NO;
     } else if([@[@"accentLight",@"accentDark"] containsObject:name]) {
         return [value isKindOfClass:NSString.class];
     } else if([key hasPrefix:@"LCOrbit.module."] ||
-              [@[@"fullscreenMultitask",@"systemMultitaskMenu",@"autoSyncSharedTweaks",@"idleAlpha",@"menuExtension",@"menuCornerRadius",@"menuCurveSoftness",@"menuCompactIconSize",@"menuListIconSize",@"menuTopPadding",@"orbHandleStyle",@"orbHandleReach",@"orbHandleLength",@"orbCapsuleCorner",@"orbSoftness",@"orbGlowLength",@"orbGlowBrightness",@"orbSnapDuration",@"orbSnapDamping",@"fadeDelay",@"fadedOpacity",@"popAnimation",@"iconFrame",@"glowLine",@"roundedTop",@"previewFollowsMode",@"orbScale",@"orbWidth",@"orbY",@"onLeft",@"roundOrb",@"autoFade",@"haptic",@"confirm",@"showRestart",@"compactRestart",@"compactMode",@"panelScale",@"glassTint",@"clearGlass",@"appearanceMode",@"preferDarkIcons"] containsObject:name] ||
+              [@[@"fullscreenMultitask",@"systemMultitaskMenu",@"autoSyncSharedTweaks",@"idleAlpha",@"menuExtension",@"menuCornerRadius",@"menuCurveSoftness",@"menuCompactIconSize",@"menuListIconSize",@"menuTopPadding",@"orbHandleStyle",@"orbHandleReach",@"orbHandleLength",@"orbCapsuleCorner",@"orbSoftness",@"orbGlowLength",@"orbGlowBrightness",@"orbSnapDuration",@"orbSnapDamping",@"fadeDelay",@"fadedOpacity",@"popAnimation",@"iconFrame",@"glowLine",@"roundedTop",@"previewFollowsMode",@"orbScale",@"orbWidth",@"orbY",@"onLeft",@"roundOrb",@"autoFade",@"haptic",@"hapticStrength",@"confirm",@"showRestart",@"compactRestart",@"compactMode",@"panelScale",@"glassTint",@"clearGlass",@"appearanceMode",@"preferDarkIcons"] containsObject:name] ||
               [name hasPrefix:@"appAlpha."] || [name hasPrefix:@"override."] ||
               [name hasPrefix:@"doubleTap."] || [name hasPrefix:@"stealth."] || [name hasPrefix:@"appEnabled."]) {
         return [value isKindOfClass:NSNumber.class];
@@ -54,32 +72,6 @@ static NSDictionary *LegacyValues(void) {
 }
 static NSString *ConfigPath(NSString *root) { return [root stringByAppendingPathComponent:@"config.json"]; }
 static NSString *BackupPath(NSString *root) { return [root stringByAppendingPathComponent:@"config.last-good.json"]; }
-
-// Strata: 读取任意一项设置原本都要 flock + 解析 config.json 与 backup 两份 JSON。
-// 悬浮菜单每帧的几何计算会连读十几个值，主线程会被磁盘 IO 拖住。这里按配置
-// 文件的 stat 指纹做进程内缓存：命中时只做一次 lstat；其他进程（宿主 / 其他访客）
-// 写入会改变 mtime / ctime / size / inode，缓存随即失效，跨进程语义不变。
-static NSMutableDictionary<NSString *,NSDictionary *> *CachedValues;
-static NSMutableDictionary<NSString *,NSDictionary *> *CachedStamp;
-static NSDictionary *ConfigStamp(NSString *root) {
-    if(!root.length) return nil;
-    struct stat info;
-    if(lstat(ConfigPath(root).fileSystemRepresentation,&info)!=0 || !S_ISREG(info.st_mode)) return nil;
-#if defined(__APPLE__)
-    long long msec=(long long)info.st_mtimespec.tv_sec, mnano=(long long)info.st_mtimespec.tv_nsec;
-    long long csec=(long long)info.st_ctimespec.tv_sec, cnano=(long long)info.st_ctimespec.tv_nsec;
-#else
-    long long msec=(long long)info.st_mtime, mnano=0;
-    long long csec=(long long)info.st_ctime, cnano=0;
-#endif
-    return @{@"dev":@(info.st_dev),@"ino":@(info.st_ino),@"size":@(info.st_size),
-             @"mtime":@(msec),@"mtimeNano":@(mnano),
-             @"ctime":@(csec),@"ctimeNano":@(cnano)};
-}
-static void EnsureCaches(void) {
-    if(!CachedValues) CachedValues=[NSMutableDictionary dictionary];
-    if(!CachedStamp) CachedStamp=[NSMutableDictionary dictionary];
-}
 static NSDictionary *ReadDocument(NSString *file,NSError **error) {
     struct stat info;
     if(lstat(file.fileSystemRepresentation,&info)!=0 || !S_ISREG(info.st_mode) || info.st_size<0 || (unsigned long long)info.st_size>MaximumConfigSize) {
@@ -149,41 +141,30 @@ static NSDictionary *Load(NSString *root,BOOL *valid,NSError **error) {
     }
     if(*valid) {
         LastGood[root]=[values copy];
-        // Strata: 读路径不再每次解析并回写 backup。setObject: 写入时已同时
-        // 维护 config.json 与 backup，这里的比较属于纯重复 IO。
+        NSDictionary *backup=ReadDocument(BackupPath(root),nil);
+        if(![backup isEqual:values]) WriteDocument(BackupPath(root),values,nil);
         return values;
     }
     NSDictionary *recovered=ReadDocument(BackupPath(root),nil) ?: LastGood[root] ?: LegacyValues();
     LastGood[root]=[recovered copy];
     return recovered;
 }
-static NSDictionary *ReadValues(void) {
+static NSDictionary *ReadValuesFromDisk(void) {
     @synchronized(LCOrbitStorage.class) {
-        EnsureCaches();
-        NSError *error=nil;NSString *root=[LCOrbitStorage rootPath];
-        // Fast path: an unchanged config.json is served from memory. lstat is
-        // cheap and picks up writes made by the host or another guest process.
-        if(root.length) {
-            NSDictionary *stamp=ConfigStamp(root),*cached=CachedValues[root];
-            if(cached && stamp && [stamp isEqualToDictionary:CachedStamp[root]]) {
-                StorageError=nil;
-                return cached;
-            }
-        }
-        int lock=LockRoot(root,&error);
+        NSError *error=nil;NSString *root=[LCOrbitStorage rootPath];int lock=LockRoot(root,&error);
         if(lock<0) {
             StorageError=error?:Error(@"无法访问 LC 宿主配置目录。");
             return (root?LastGood[root]:nil) ?: LegacyValues();
         }
         BOOL valid=NO;NSDictionary *values=Load(root,&valid,&error);
-        Unlock(lock);StorageError=error;
-        if(root.length && values && !error) {
-            NSDictionary *stamp=ConfigStamp(root);
-            if(stamp) { CachedValues[root]=values;CachedStamp[root]=stamp; }
-            else { [CachedValues removeObjectForKey:root];[CachedStamp removeObjectForKey:root]; }
-        }
-        return values;
+        Unlock(lock);StorageError=error;return values;
     }
+}
+static NSDictionary *ReadValues(void) {
+    NSString *root=[LCOrbitStorage rootPath];
+    for(LCOrbitReadSnapshot *snapshot in ReadSnapshots().reverseObjectEnumerator)
+        if(SameRoot(snapshot.root,root)) return snapshot.values;
+    return ReadValuesFromDisk();
 }
 @implementation LCOrbitPreferences
 - (id)objectForKey:(NSString *)key {
@@ -214,11 +195,7 @@ static NSDictionary *ReadValues(void) {
             if(value) next[key]=value;else [next removeObjectForKey:key];
             if(WriteDocument(ConfigPath(root),next,&error)) {
                 LastGood[root]=[next copy];WriteDocument(BackupPath(root),next,nil);
-                // Strata: 让本进程的下一次读取立刻看到新值，无需再解析一次 JSON。
-                EnsureCaches();
-                NSDictionary *stamp=ConfigStamp(root);
-                if(stamp) { CachedValues[root]=[next copy];CachedStamp[root]=stamp; }
-                else { [CachedValues removeObjectForKey:root];[CachedStamp removeObjectForKey:root]; }
+                RefreshReadSnapshots(root,next);
             }
         }
         Unlock(lock);StorageError=error;
@@ -247,8 +224,27 @@ static NSDictionary *ReadValues(void) {
     static LCOrbitPreferences *preferences;static dispatch_once_t once;
     dispatch_once(&once,^{preferences=[LCOrbitPreferences new];});return preferences;
 }
++ (void)beginReadSnapshot:(NSDictionary *)values {
+    LCOrbitReadSnapshot *snapshot=[LCOrbitReadSnapshot new];
+    snapshot.root=[self rootPath];
+    snapshot.values=values?:ReadValuesFromDisk();
+    NSMutableDictionary *thread=NSThread.currentThread.threadDictionary;
+    NSMutableArray *snapshots=thread[ReadSnapshotsKey];
+    if(!snapshots) thread[ReadSnapshotsKey]=snapshots=[NSMutableArray array];
+    [snapshots addObject:snapshot];
+}
++ (void)endReadSnapshot {
+    NSMutableArray *snapshots=ReadSnapshots();
+    [snapshots removeLastObject];
+    if(!snapshots.count) [NSThread.currentThread.threadDictionary removeObjectForKey:ReadSnapshotsKey];
+}
 + (BOOL)reloadWithError:(NSError **)error {
-    @synchronized(self) { ReadValues();if(error) *error=StorageError;return StorageError==nil; }
+    @synchronized(self) {
+        NSDictionary *values=ReadValuesFromDisk();
+        if(!StorageError) RefreshReadSnapshots([self rootPath],values);
+        if(error) *error=StorageError;
+        return StorageError==nil;
+    }
 }
 + (NSError *)lastError { @synchronized(self) { return StorageError; } }
 @end

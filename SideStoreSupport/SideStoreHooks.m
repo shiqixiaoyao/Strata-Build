@@ -22,6 +22,25 @@
 
 @end
 
+void LCSSExportWidgetSnapshot(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSURL *groupURL = [LCSharedUtils appGroupPath];
+    if (!groupURL) return;
+    NSURL *source = [groupURL URLByAppendingPathComponent:@"widget_data.json"];
+    NSData *data = [NSData dataWithContentsOfURL:source];
+    if (!data || ![NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL]) return;
+    const char *home = getenv("LC_HOME_PATH");
+    NSString *homePath = (home && home[0]) ? [NSString stringWithUTF8String:home] : NSHomeDirectory();
+    NSURL *folder = [[NSURL fileURLWithPath:homePath isDirectory:YES] URLByAppendingPathComponent:@"Documents/LCSS" isDirectory:YES];
+    NSError *error = nil;
+    if (![fm createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSLog(@"[LCSS] Create folder failed: %@", error);
+        return;
+    }
+    NSURL *destination = [folder URLByAppendingPathComponent:@"widget_data.json"];
+    if (![data writeToURL:destination options:NSDataWritingAtomic error:&error])
+        NSLog(@"[LCSS] Snapshot export failed: %@", error);
+}
 static NSMutableDictionary<NSString *, UIWindow *> *SSVersionWindows;
 static id SSSceneObserver;
 
@@ -116,12 +135,19 @@ void SideStoreMyAppsViewController_hook_viewDidload(UICollectionViewController* 
                                                                   target:self
                                                                   action:@selector(escapeButtonTapped:)];
         
-    NSMutableArray* oldToolBarItems = [self.navigationItem.leftBarButtonItems mutableCopy];
+    NSMutableArray* oldToolBarItems = [self.navigationItem.leftBarButtonItems mutableCopy] ?: [NSMutableArray array];
     [oldToolBarItems addObject:escapeItem];
     self.navigationItem.leftBarButtonItems = oldToolBarItems;
 }
 
 void SideStoreMyAppsViewController_hook_escapeButtonTapped(UICollectionViewController* self, SEL cmd, id target) {
+    // Explicit rescue path for old LCFloatingMenu builds.  The previous
+    // quick-switcher left this flag stuck and trapped users in SideStore.
+    NSUserDefaults *defaults = NSUserDefaults.lcUserDefaults ?: NSUserDefaults.standardUserDefaults;
+    [defaults setBool:NO forKey:@"LCOpenSideStore"];
+    [defaults setObject:@"ui" forKey:@"selected"];
+    [defaults removeObjectForKey:@"selectedContainer"];
+    [defaults removeObjectForKey:@"launchAppUrlScheme"];
     [LCSharedUtils launchToGuestAppWithClassicMode:0];
 }
 
@@ -222,6 +248,7 @@ void installSideStoreHooks(void) {
             
             if ([scene isKindOfClass:UIWindowScene.class]) {
                 SSInstallVersionWindow((UIWindowScene *)scene);
+                LCSSExportWidgetSnapshot();
             }
         }];
         

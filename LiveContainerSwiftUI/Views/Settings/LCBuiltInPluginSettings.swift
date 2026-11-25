@@ -23,7 +23,7 @@ struct LCBuiltInPluginSettings: View {
             } header: {
                 Text("Built-in plugins".loc)
             } footer: {
-                Text("The grid is injected into LiveContainer itself. The floating menu ships inside TweakLoader, so it appears both in LiveContainer and inside every app it launches. Changing either switch takes effect after a full restart.".loc)
+                Text("The grid is injected into LiveContainer itself. The floating menu ships inside TweakLoader and starts only inside the apps it launches, not in LiveContainer\u{2019}s own UI. Changing either switch takes effect after a full restart.".loc)
             }
 
             Section {

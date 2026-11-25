@@ -3,6 +3,8 @@
 #import "LCOrbitOverlayManager.h"
 #import "LCOrbitEventBus.h"
 #import "LCOrbitStorage.h"
+#import "LCOrbitGuestUIKitDiagnostics.h"
+#import <objc/message.h>
 
 @implementation LCOrbitContext
 - (instancetype)init {
@@ -131,121 +133,23 @@
 @end
 
 extern void LCFloatingMenuRegisterWithOrbit(LCOrbitCore *core);
-
-// Strata: Orbit / 悬浮菜单随 TweakLoader 注入每一个访客。
-//
-// 原插件的启动条件在 Strata 2.0 上一条都不成立：
-//   1) 它要求 [LCOrbitHost guestInfo] 非空 —— 但 guestAppInfo 是 LCBootstrap.m
-//      里的宿主静态变量，访客扩展进程 / 多任务复用进程的启动早期经常还是 nil；
-//   2) 它要求 !isLiveProcess —— Strata 的多任务访客本身就运行在
-//      LiveProcess.appex 里，这条会把访客全部排除。
-// v7 因为这两条导致开关打开也没有任何反应，这里改为「只要确实是访客进程就启动」，
-// 只排除 LC 自身界面与内置 SideStore，并把每次判定结果写进 App Group，方便在
-// 设置页看到「为什么没起来」。
-
-static NSString *const LCOrbitSwitchKey=@"StrataFloatingMenuEnabled";
-static NSString *const LCOrbitStatusKey=@"StrataOrbitStatus";
-
-static void LCOrbitReportStatus(NSString *phase, NSString *detail) {
-    NSUserDefaults *store=[LCOrbitHost sharedDefaults];
-    if(!store) return;
-    [store setObject:@{@"phase":phase?:@"",
-                       @"detail":detail?:@"",
-                       @"date":[NSDate date],
-                       @"guest":[LCOrbitHost guestIdentifier]?:@""}
-               forKey:LCOrbitStatusKey];
-    [store synchronize];
-}
-
-// 开关可能落在这几处：宿主 setenv 的环境变量（普通访客进程会继承）、App Group
-// defaults（设置页 @AppStorage 写的地方）、宿主自己的 defaults。都读不到时按
-// 「开启」处理并回写 App Group —— 用户明确要求这个功能默认可用，而原来的实现
-// 一旦开关写串 suite 就永远读不到，表现为「打开开关也没有用」。
-static BOOL LCOrbitSwitchValue(NSString **source) {
-    const char *flag=getenv("LC_ORBIT_ENABLED");
-    if(flag && flag[0]=='1') { if(source) *source=@"env"; return YES; }
-    if(flag && flag[0]=='0') { if(source) *source=@"env-off"; return NO; }
-    NSUserDefaults *shared=[LCOrbitHost sharedDefaults];
-    NSUserDefaults *host=[LCOrbitHost hostDefaults];
-    NSUserDefaults *stores[2]={shared,host};
-    for(NSUInteger i=0;i<2;i++) {
-        id value=[stores[i] objectForKey:LCOrbitSwitchKey];
-        if(!value) continue;
-        if(source) *source=@"defaults";
-        return [value boolValue];
-    }
-    [shared setBool:YES forKey:LCOrbitSwitchKey];
-    [shared synchronize];
-    if(source) *source=@"default-on";
-    return YES;
-}
-
-static BOOL LCOrbitBootstrapped=NO;
-static NSInteger LCOrbitAttempts=0;
-static id LCOrbitActivationObserver=nil;
-static id LCOrbitSceneObserver=nil;
-
-static void LCOrbitStopWaiting(void) {
-    NSNotificationCenter *center=NSNotificationCenter.defaultCenter;
-    if(LCOrbitActivationObserver) {
-        [center removeObserver:LCOrbitActivationObserver];
-        LCOrbitActivationObserver=nil;
-    }
-    if(LCOrbitSceneObserver) {
-        [center removeObserver:LCOrbitSceneObserver];
-        LCOrbitSceneObserver=nil;
-    }
-}
-
-static void LCOrbitBootstrapIfNeeded(void) {
-    if(LCOrbitBootstrapped) return;
-    LCOrbitAttempts++;
-    NSString *source=nil;
-    if(!LCOrbitSwitchValue(&source)) {
-        if(LCOrbitAttempts==1) LCOrbitReportStatus(@"switch-off",source);
-        return;
-    }
-    // 只在访客进程（被注入的那个 App）里启动，宿主 LC 本体一律不启动。
-    // 这是 v19 的真实行为：v19 的 LCLoadTweaksToSelf 默认是关的，TweakLoader 根本
-    // 不会进宿主，所以 Orbit 的宿主分支（isHostUI）在 LC 里从来没跑过。那条分支是
-    // 4.0 宿主（Strata）才配得上的东西，硬拉进 3.9 宿主就是启动即崩。
-    BOOL guestContext=[LCOrbitHost isGuestContext];
-    if(!guestContext) {
-        if(LCOrbitAttempts==1)
-            LCOrbitReportStatus(@"not-guest",[NSString stringWithFormat:@"guest=%d bundle=%@",
-                guestContext,NSBundle.mainBundle.bundleIdentifier?:@"?"]);
-        return;
-    }
-    LCOrbitBootstrapped=YES;
-    LCOrbitStopWaiting();
-    NSLog(@"[Strata][Orbit] bootstrap enabled, context=guest guest=%@ source=%@ attempt=%ld",
-          [LCOrbitHost guestIdentifier],source,(long)LCOrbitAttempts);
-    LCOrbitCore *core=[LCOrbitCore sharedCore];
-    LCFloatingMenuRegisterWithOrbit(core);
-    [core start];
-    LCOrbitReportStatus(@"started",source);
-}
-
 __attribute__((constructor)) static void LCOrbitEntry(void) {
-    // 构造期跑在 dyld 初始化里，此时还没有 UIApplication/scene，一律推迟到主队列；
-    // 访客的 scene、defaults、guestAppInfo 就绪时间差别很大，所以多档重试。
-    dispatch_async(dispatch_get_main_queue(), ^{ LCOrbitBootstrapIfNeeded(); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.6*NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),^{ LCOrbitBootstrapIfNeeded(); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.0*NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),^{ LCOrbitBootstrapIfNeeded(); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(5.0*NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),^{ LCOrbitBootstrapIfNeeded(); });
-    // 访客进程可能早在开关打开之前就已运行（Strata 2.0 会复用进程）。回到前台
-    // 或场景激活时再确认一次；启动成功后观察者立即移除，之后不再有任何开销。
-    LCOrbitActivationObserver=[NSNotificationCenter.defaultCenter
-        addObserverForName:UIApplicationDidBecomeActiveNotification object:nil
-        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
-            LCOrbitBootstrapIfNeeded();
-        }];
-    LCOrbitSceneObserver=[NSNotificationCenter.defaultCenter
-        addObserverForName:UISceneDidActivateNotification object:nil
-        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
-            LCOrbitBootstrapIfNeeded();
-        }];
+    // Shared global tweaks can load this image into a LiveProcess even though
+    // the switcher belongs exclusively to the host. LiveProcess has separate
+    // defaults, so do not depend on a host preference being present here.
+    // Classic single-task Guests are not LiveProcess and still bootstrap.
+    Class diagnostics=NSClassFromString(@"LCOrbitGuestUIKitDiagnostics");
+    SEL start=NSSelectorFromString(@"startInLiveProcess");
+    if(diagnostics && [diagnostics respondsToSelector:start])
+        ((void(*)(id,SEL))objc_msgSend)(diagnostics,start);
+    SEL process=NSSelectorFromString(@"isLiveProcess");
+    if([NSUserDefaults respondsToSelector:process] &&
+       ((BOOL(*)(id,SEL))objc_msgSend)(NSUserDefaults.class,process)) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LCOrbitCore *core=[LCOrbitCore sharedCore];
+        if([LCOrbitHost isHostUI])
+            [LCOrbitGuestUIKitDiagnostics synchronizeUIKitModesToGuests];
+        LCFloatingMenuRegisterWithOrbit(core);
+        [core start];
+    });
 }

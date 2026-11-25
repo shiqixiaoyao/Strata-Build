@@ -1,5 +1,5 @@
 #import <UIKit/UIKit.h>
-#import "LCOrbitModule.h"
+#import "../SDK/LCOrbitModule.h"
 @class LCOrbitOverlayManager, LCOrbitEventBus;
 
 NS_ASSUME_NONNULL_BEGIN
