@@ -468,6 +468,30 @@ static NSDictionary<NSString *, NSString *> *StrataStoryboardZhMap(void) {
             @"Resign Later": @"稍后重签",
             @"Could not connect to SideStore.": @"无法连接到 SideStore。",
             @"What's New": @"新功能",
+            // 关于页 / 致谢
+            @"Developers": @"开发者",
+            @"UI Designer": @"界面设计",
+            @"Asset Designer": @"素材设计",
+            @"Licenses": @"开源许可",
+            @"Acknowledgements": @"致谢",
+            @"Credits": @"致谢",
+            @"About": @"关于",
+            // 通用按钮
+            @"Done": @"完成",
+            @"Cancel": @"取消",
+            @"OK": @"好",
+            @"Continue": @"继续",
+            @"Resend": @"重新发送",
+            @"Sign In": @"登录",
+            @"Log Out": @"退出登录",
+            @"Sign Out": @"退出登录",
+            @"Delete": @"删除",
+            @"Refresh All": @"全部刷新",
+            @"Refresh": @"刷新",
+            @"Install": @"安装",
+            @"Open": @"打开",
+            @"Update": @"更新",
+            @"Updates": @"更新",
         };
     });
     return map;
@@ -483,17 +507,155 @@ static NSString *StrataLocalizedStringForKey(NSBundle *self, SEL _cmd, NSString 
     return ((NSString *(*)(id, SEL, NSString *, NSString *, NSString *))StrataOriginalLocalizedStringIMP)(self, _cmd, key, value, table);
 }
 
+// 查表：允许尾部省略号有/无两种写法（nib 里是 "Clear Data Cache…"，
+// 表里写的是 "Clear Data Cache"），命中后按原文把省略号补回去。
+static NSString *StrataZhLookup(NSString *raw) {
+    if (raw.length == 0) return nil;
+    NSDictionary<NSString *, NSString *> *map = StrataStoryboardZhMap();
+    NSString *hit = map[raw];
+    if (hit) return hit;
+    NSString *text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    hit = map[text];
+    if (hit) return hit;
+    BOOL ellipsis = NO;
+    if ([text hasSuffix:@"…"]) {
+        ellipsis = YES;
+        text = [text substringToIndex:text.length - 1];
+    } else if ([text hasSuffix:@"..."]) {
+        ellipsis = YES;
+        text = [text substringToIndex:text.length - 3];
+    }
+    if (!ellipsis) return nil;
+    text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    hit = map[text];
+    return hit ? [hit stringByAppendingString:@"…"] : nil;
+}
+
+#pragma mark - Strata: SideStore 界面文案兜底
+
+// 实测：SideStore 的 storyboard 没有做本地化（storyboardc 直接放在 bundle 根，
+// 没有 Base.lproj），UIKit 加载这样的 nib 时根本不会去查字符串表，
+// 所以在 NSBundle 上做手脚对它是无效的——3.10.1 装机后整屏仍是英文就是这个原因。
+//
+// 因此在界面真正显示出来之后，按视图树把已知英文原文换成中文：
+// 只在启动内置 SideStore 时开启，只认表里确切存在的句子，表里没有的一律不动。
+static BOOL StrataSideStoreZhOn = NO;
+static IMP StrataOriginalViewDidAppearIMP;
+
+static void StrataLocalizeTextsInView(UIView *view, int depth);
+
+static void StrataLocalizeTabBarItems(UITabBar *bar) {
+    for (UITabBarItem *item in bar.items) {
+        NSString *zh = StrataZhLookup(item.title);
+        if (zh) item.title = zh;
+    }
+    [bar setNeedsLayout];
+}
+
+static void StrataLocalizeTextsInView(UIView *view, int depth) {
+    if (!view || depth > 48) return;
+    for (UIView *sub in [view.subviews copy]) {
+        StrataLocalizeTextsInView(sub, depth + 1);
+    }
+    if ([view isKindOfClass:UILabel.class]) {
+        UILabel *label = (UILabel *)view;
+        NSString *zh = StrataZhLookup(label.text);
+        if (zh) label.text = zh;
+    } else if ([view isKindOfClass:UIButton.class]) {
+        UIButton *button = (UIButton *)view;
+        for (NSNumber *state in @[@(UIControlStateNormal), @(UIControlStateHighlighted),
+                                  @(UIControlStateSelected), @(UIControlStateDisabled)]) {
+            NSString *zh = StrataZhLookup([button titleForState:state.unsignedIntegerValue]);
+            if (zh) [button setTitle:zh forState:state.unsignedIntegerValue];
+        }
+    } else if ([view isKindOfClass:UITextField.class]) {
+        UITextField *field = (UITextField *)view;
+        NSString *zh = StrataZhLookup(field.placeholder);
+        if (zh) field.placeholder = zh;
+    } else if ([view isKindOfClass:UISegmentedControl.class]) {
+        UISegmentedControl *seg = (UISegmentedControl *)view;
+        for (NSUInteger i = 0; i < seg.numberOfSegments; i++) {
+            NSString *zh = StrataZhLookup([seg titleForSegmentAtIndex:i]);
+            if (zh) [seg setTitle:zh forSegmentAtIndex:i];
+        }
+    } else if ([view isKindOfClass:UISearchBar.class]) {
+        UISearchBar *search = (UISearchBar *)view;
+        NSString *zh = StrataZhLookup(search.placeholder);
+        if (zh) search.placeholder = zh;
+    } else if ([view isKindOfClass:UITableViewCell.class]) {
+        UITableViewCell *cell = (UITableViewCell *)view;
+        NSString *zh = StrataZhLookup(cell.textLabel.text);
+        if (zh) cell.textLabel.text = zh;
+    } else if ([view isKindOfClass:UINavigationBar.class]) {
+        UINavigationBar *bar = (UINavigationBar *)view;
+        for (UINavigationItem *item in bar.items) {
+            NSString *zh = StrataZhLookup(item.title);
+            if (zh) item.title = zh;
+            zh = StrataZhLookup(item.prompt);
+            if (zh) item.prompt = zh;
+            zh = StrataZhLookup(item.backBarButtonItem.title);
+            if (zh) item.backBarButtonItem.title = zh;
+        }
+        [bar setNeedsLayout];
+    } else if ([view isKindOfClass:UITabBar.class]) {
+        StrataLocalizeTabBarItems((UITabBar *)view);
+    }
+}
+
+static void StrataLocalizeSideStoreUI(void) {
+    if (!StrataSideStoreZhOn) return;
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        StrataLocalizeTextsInView(window, 0);
+    }
+}
+
+static void StrataLocalizeControllerChrome(UIViewController *vc) {
+    NSString *zh = StrataZhLookup(vc.title);
+    if (zh) vc.title = zh;
+    zh = StrataZhLookup(vc.navigationItem.title);
+    if (zh) vc.navigationItem.title = zh;
+    zh = StrataZhLookup(vc.tabBarItem.title);
+    if (zh) vc.tabBarItem.title = zh;
+    zh = StrataZhLookup(vc.navigationItem.backBarButtonItem.title);
+    if (zh) vc.navigationItem.backBarButtonItem.title = zh;
+}
+
+static void StrataScheduleLocalizePasses(void) {
+    for (NSNumber *delay in @[@0.0, @0.15, @0.5, @1.2]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            StrataLocalizeSideStoreUI();
+        });
+    }
+}
+
+static void StrataVCViewDidAppear(UIViewController *self, SEL _cmd) {
+    ((void (*)(id, SEL))StrataOriginalViewDidAppearIMP)(self, _cmd);
+    if (!StrataSideStoreZhOn) return;
+    StrataLocalizeControllerChrome(self);
+    StrataScheduleLocalizePasses();
+}
+
 static void StrataInstallStoryboardZh(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        StrataSideStoreZhOn = YES;
+
         Method method = class_getInstanceMethod(NSBundle.class, @selector(localizedStringForKey:value:table:));
-        if (!method) {
-            StrataPluginLog(@"storyboard zh: NSBundle method missing");
-            return;
+        if (method) {
+            StrataOriginalLocalizedStringIMP = method_getImplementation(method);
+            method_setImplementation(method, (IMP)StrataLocalizedStringForKey);
         }
-        StrataOriginalLocalizedStringIMP = method_getImplementation(method);
-        method_setImplementation(method, (IMP)StrataLocalizedStringForKey);
-        StrataPluginLog(@"storyboard zh installed, %lu entries", (unsigned long)StrataStoryboardZhMap().count);
+
+        Method appear = class_getInstanceMethod(UIViewController.class, @selector(viewDidAppear:));
+        if (appear) {
+            StrataOriginalViewDidAppearIMP = method_getImplementation(appear);
+            method_setImplementation(appear, (IMP)StrataVCViewDidAppear);
+        }
+
+        StrataScheduleLocalizePasses();
+        StrataPluginLog(@"sidestore zh installed, %lu entries, viewDidAppear hooked %d",
+                        (unsigned long)StrataStoryboardZhMap().count, appear != NULL);
     });
 }
 
