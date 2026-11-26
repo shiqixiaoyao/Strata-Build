@@ -378,6 +378,125 @@ static BOOL StrataClassBool(Class cls, NSString *selectorName) {
     return ((BOOL(*)(id, SEL))objc_msgSend)(cls, sel);
 }
 
+#pragma mark - Strata: SideStore storyboard 文案
+
+// SideStore 的主界面（tab 栏、设置页各行标题、欢迎页、关于页）是 storyboard 驱动的，
+// 文案在编译时就进了 nib，完全不经过 Localizable.strings —— 那份 2443 条的 v19 表
+// 只覆盖 NSLocalizedString 那一半，所以这些位置一直是英文，和版本无关。
+//
+// UIKit 加载 storyboard 时会走 -[NSBundle localizedStringForKey:value:table:]，
+// 其中 value 就是 nib 里的英文原文。这里只按原文查表返回中文：不改 nib 字节，
+// 不交换 UIKit 的界面方法，也不碰任何控制流，命中不了就原样交还给系统。
+static NSDictionary<NSString *, NSString *> *StrataStoryboardZhMap(void) {
+    static NSDictionary *map;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        map = @{
+            // tab 栏
+            @"Settings": @"设置",
+            @"News": @"资讯",
+            @"Browse": @"浏览",
+            @"My Apps": @"我的 App",
+            @"Sources": @"源",
+            @"Search": @"搜索",
+            @"Library": @"资源库",
+            // 浏览与源
+            @"All Apps": @"全部 App",
+            @"All News": @"全部资讯",
+            @"Add Source": @"添加源",
+            @"No Updates Available": @"暂无可用更新",
+            @"View App IDs": @"查看 App ID",
+            @"App IDs": @"App ID",
+            @"App IDs Description": @"App ID 说明",
+            // 设置页
+            @"Certificate Management": @"证书管理",
+            @"Profiles Management": @"描述文件管理",
+            @"Pairing File Management": @"配对文件管理",
+            @"Developer Portal Services": @"开发者门户服务",
+            @"Anisette Servers": @"Anisette 服务器",
+            @"Connection Config": @"连接配置",
+            @"Network Discovery (mDNS)": @"网络发现（mDNS）",
+            @"Backup & Restore": @"备份与恢复",
+            @"Storage Explorer": @"存储浏览",
+            @"Clear Data Cache": @"清除数据缓存",
+            @"Change App Icon": @"更改 App 图标",
+            @"Background Refresh": @"后台刷新",
+            @"Disable Idle Timeout": @"禁用空闲超时",
+            @"Disable App Limit": @"解除 App 数量限制",
+            @"Allow Siri To Refresh Apps": @"允许 Siri 刷新 App",
+            @"Enable Beta Updates": @"启用测试版更新",
+            @"Beta Updates Track": @"测试版更新通道",
+            @"User Customizations": @"用户自定义",
+            @"Prompt AppExtns Customization": @"App 扩展自定义提示",
+            @"Experimental Features": @"实验性功能",
+            @"Developer Options": @"开发者选项",
+            @"Asset Designer": @"素材设计器",
+            @"Send Feedback": @"发送反馈",
+            @"Support the team": @"支持团队",
+            @"Support us": @"支持我们",
+            @"Follow SideStore for updates": @"关注 SideStore 获取更新",
+            @"Health Check": @"运行状况检查",
+            @"How it works": @"工作原理",
+            @"View Error Log": @"查看错误日志",
+            @"View Refresh Attempts": @"查看刷新尝试记录",
+            @"Refresh Attempts": @"刷新尝试次数",
+            @"Error Log": @"错误日志",
+            @"Error Code": @"错误代码",
+            @"Error Description": @"错误说明",
+            @"Software Licenses": @"开源许可",
+            // 登录与引导
+            @"Welcome to SideStore.": @"欢迎使用 SideStore。",
+            @"Sign in with your Apple ID to get started.": @"使用 Apple ID 登录以开始。",
+            @"Sign in with Apple ID": @"使用 Apple ID 登录",
+            @"Sign in": @"登录",
+            @"Why do we need this?": @"为什么需要这个？",
+            @"Select a Team": @"选择团队",
+            @"APPLE ID": @"APPLE ID",
+            // 首次启动引导
+            @"Launch SideStore": @"启动 SideStore",
+            @"Leave SideStore running in the background on your idevice.": @"让 SideStore 在设备后台保持运行。",
+            @"Connect to Wi-Fi and VPN": @"连接 Wi-Fi 和 VPN",
+            @"Enable LocalDevVPN and use Sidestore on the go.": @"启用 LocalDevVPN，随时随地使用 SideStore。",
+            @"Download Apps": @"下载 App",
+            @"Browse and download apps directly from SideStore.": @"直接从 SideStore 浏览并下载 App。",
+            @"Apps Refresh Automatically": @"App 自动刷新",
+            @"Apps are refreshed in the background while you are on SideStore VPN!": @"连接 SideStore VPN 时，App 会在后台自动刷新。",
+            @"Got it": @"知道了",
+            // 重签与提示
+            @"Resign SideStore": @"重签 SideStore",
+            @"Resign Now": @"立即重签",
+            @"Resign Later": @"稍后重签",
+            @"Could not connect to SideStore.": @"无法连接到 SideStore。",
+            @"What's New": @"新功能",
+        };
+    });
+    return map;
+}
+
+static IMP StrataOriginalLocalizedStringIMP;
+
+static NSString *StrataLocalizedStringForKey(NSBundle *self, SEL _cmd, NSString *key, NSString *value, NSString *table) {
+    NSDictionary<NSString *, NSString *> *map = StrataStoryboardZhMap();
+    NSString *hit = value.length ? map[value] : nil;
+    if (!hit && key.length) hit = map[key];
+    if (hit) return hit;
+    return ((NSString *(*)(id, SEL, NSString *, NSString *, NSString *))StrataOriginalLocalizedStringIMP)(self, _cmd, key, value, table);
+}
+
+static void StrataInstallStoryboardZh(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Method method = class_getInstanceMethod(NSBundle.class, @selector(localizedStringForKey:value:table:));
+        if (!method) {
+            StrataPluginLog(@"storyboard zh: NSBundle method missing");
+            return;
+        }
+        StrataOriginalLocalizedStringIMP = method_getImplementation(method);
+        method_setImplementation(method, (IMP)StrataLocalizedStringForKey);
+        StrataPluginLog(@"storyboard zh installed, %lu entries", (unsigned long)StrataStoryboardZhMap().count);
+    });
+}
+
 // 启动 3 秒后回看一次：插件的宿主判定、注册的模块、以及屏幕上到底有没有它的窗口。
 static void StrataReportBuiltInPluginState(void) {
     StrataPluginLog(@"---- t+3s ----");
@@ -993,6 +1112,8 @@ int LiveContainerMain(int argc, char *argv[]) {
     }
     if(sideStoreExist && (legacySideStoreRequest || [selectedApp isEqualToString:@"builtinSideStore"])) {
         isSideStore = true;
+        // 必须在 SideStore 的 storyboard 加载之前装好，否则首页还是英文。
+        StrataInstallStoryboardZh();
     }
     
     if(selectedApp && !isSideStore && !selectedContainer) {
